@@ -3,6 +3,7 @@ import { RouterProvider } from 'react-router-dom';
 import SplashScreen from './components/SplashScreen';
 import { AuthProvider } from './contexts/AuthContext';
 import { LocaleProvider } from './contexts/LocaleContext';
+import { SocketProvider } from './contexts/SocketContext';
 import { ThemeProvider } from './contexts/ThemeContext';
 import { WalletProvider } from './contexts/WalletContext';
 import { router } from './router';
@@ -25,9 +26,11 @@ export default function App() {
     <ThemeProvider>
       <LocaleProvider>
         <AuthProvider>
-          <WalletProvider>
-            <AppInner />
-          </WalletProvider>
+          <SocketProvider>
+            <WalletProvider>
+              <AppInner />
+            </WalletProvider>
+          </SocketProvider>
         </AuthProvider>
       </LocaleProvider>
     </ThemeProvider>
