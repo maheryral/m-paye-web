@@ -1,25 +1,31 @@
 import {
+  Calendar,
   CheckCircle2,
+  Clock,
   Droplets,
+  FileText,
+  Info,
   Lock,
+  Receipt,
   Tv,
   Wifi,
   Zap,
   type LucideIcon,
 } from 'lucide-react';
 import { useState } from 'react';
-import GradientHeader from '../../components/GradientHeader';
-import { useColors } from '../../contexts/ThemeContext';
+import { Badge, Button, Card, Empty, Input, PageHeader } from '../../ui';
 
 interface BillCategory {
   id: string;
   name: string;
   icon: LucideIcon;
   color: string;
+  tagline: string;
 }
 
 interface PendingBill {
   id: string;
+  category: string;
   name: string;
   amount: number;
   dueDate: string;
@@ -34,215 +40,266 @@ interface PaidBill {
 }
 
 const CATEGORIES: BillCategory[] = [
-  { id: 'electricity', name: 'JIRAMA', icon: Zap, color: '#f59e0b' },
-  { id: 'water', name: 'JIAMA', icon: Droplets, color: '#3b82f6' },
-  { id: 'internet', name: 'Telma', icon: Wifi, color: '#8b5cf6' },
-  { id: 'tv', name: 'Canal+', icon: Tv, color: '#ef4444' },
+  { id: 'electricity', name: 'JIRAMA', icon: Zap, color: '#F59E0B', tagline: 'Électricité' },
+  { id: 'water', name: 'JIAMA', icon: Droplets, color: '#06B6D4', tagline: 'Eau' },
+  { id: 'internet', name: 'Telma', icon: Wifi, color: '#8B5CF6', tagline: 'Internet & Mobile' },
+  { id: 'tv', name: 'Canal+', icon: Tv, color: '#F43F5E', tagline: 'Télévision' },
 ];
 
 export default function Bills() {
-  const colors = useColors();
-  const [selectedBill, setSelectedBill] = useState<string | null>(null);
-  const [contractNumber, setContractNumber] = useState('');
+  const [selected, setSelected] = useState<string | null>(null);
+  const [contract, setContract] = useState('');
   const [amount, setAmount] = useState('');
 
-  // Mock data — à remplacer par le module Bill du backend quand il sera dispo
-  const pendingBills: PendingBill[] = [];
-  const paidBills: PaidBill[] = [];
+  // Mock until backend module exists
+  const pending: PendingBill[] = [];
+  const paid: PaidBill[] = [];
 
-  const handlePayBill = () => {
-    if (!contractNumber) {
-      alert('Veuillez entrer le numéro de contrat');
-      return;
-    }
+  const cat = CATEGORIES.find((c) => c.id === selected);
+
+  const pay = () => {
+    if (!contract) return alert('Numéro de contrat requis');
     const n = parseFloat(amount);
-    if (!n || n <= 0) {
-      alert('Veuillez entrer un montant valide');
-      return;
-    }
-    const cat = CATEGORIES.find((b) => b.id === selectedBill);
+    if (!n || n <= 0) return alert('Montant invalide');
     if (!confirm(`Payer ${n.toLocaleString('fr-FR')} Ar pour ${cat?.name} ?`)) return;
     alert('Paiement effectué avec succès');
-    setContractNumber('');
+    setContract('');
     setAmount('');
-    setSelectedBill(null);
+    setSelected(null);
   };
 
   return (
-    <div className="min-h-screen bg-bg pb-8">
-      <div className="max-w-3xl mx-auto">
-        <GradientHeader title="Factures" subtitle="Payez vos factures en un clic" />
+    <div className="space-y-6 animate-fade-in">
+      <PageHeader
+        title="Factures"
+        subtitle="Payez vos factures en un clic — électricité, eau, internet, TV"
+      />
 
-        <div className="px-5 mt-4 space-y-5">
-          {/* Catégories */}
-          <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
-            {CATEGORIES.map((bill) => {
-              const Icon = bill.icon;
-              const active = selectedBill === bill.id;
-              return (
-                <button
-                  key={bill.id}
-                  onClick={() => setSelectedBill(bill.id)}
-                  className="card flex flex-col items-center gap-2 py-4 transition-colors"
-                  style={
-                    active
-                      ? { borderColor: bill.color, background: `${bill.color}20` }
-                      : undefined
-                  }
-                >
-                  <Icon size={28} style={{ color: active ? bill.color : colors.textSecondary }} />
-                  <span
-                    className="text-xs font-medium"
-                    style={{ color: active ? bill.color : colors.text }}
-                  >
-                    {bill.name}
-                  </span>
-                </button>
-              );
-            })}
-          </div>
-
-          {/* Formulaire */}
-          {selectedBill && (
-            <div className="card p-4 space-y-4">
-              <h3 className="text-base font-semibold" style={{ color: colors.text }}>
-                Payer la facture {CATEGORIES.find((b) => b.id === selectedBill)?.name}
-              </h3>
-
-              <div>
-                <label className="text-sm block mb-2" style={{ color: colors.textSecondary }}>
-                  Numéro de contrat
-                </label>
-                <input
-                  className="w-full h-12 px-3 rounded-xl border bg-bg outline-none text-base"
-                  style={{ borderColor: colors.border, color: colors.text }}
-                  placeholder="Entrez votre numéro de contrat"
-                  value={contractNumber}
-                  onChange={(e) => setContractNumber(e.target.value)}
-                />
-              </div>
-
-              <div>
-                <label className="text-sm block mb-2" style={{ color: colors.textSecondary }}>
-                  Montant (Ar)
-                </label>
-                <input
-                  className="w-full h-12 px-3 rounded-xl border bg-bg outline-none text-base"
-                  style={{ borderColor: colors.border, color: colors.text }}
-                  placeholder="0"
-                  value={amount}
-                  onChange={(e) => setAmount(e.target.value.replace(/[^\d.]/g, ''))}
-                  inputMode="numeric"
-                />
-              </div>
-
+      {/* Categories */}
+      <div>
+        <h3 className="section-title mb-3 px-1">Choisir un fournisseur</h3>
+        <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
+          {CATEGORIES.map((c) => {
+            const Icon = c.icon;
+            const active = selected === c.id;
+            return (
               <button
-                onClick={handlePayBill}
-                className="w-full flex items-center justify-center gap-2 h-12 rounded-xl font-semibold text-white"
-                style={{ background: colors.primary }}
+                key={c.id}
+                onClick={() => setSelected(c.id)}
+                className={`p-5 rounded-2xl border text-left transition-all ${
+                  active
+                    ? 'border-brand-500 bg-brand-500/10 shadow-glow-soft'
+                    : 'border-bg-border bg-bg-surface hover:bg-bg-elevated'
+                }`}
               >
-                <Lock size={20} />
-                Payer
+                <div
+                  className="w-12 h-12 rounded-2xl flex items-center justify-center mb-3"
+                  style={{ background: c.color }}
+                >
+                  <Icon size={22} className="text-white" />
+                </div>
+                <div className="text-base font-bold">{c.name}</div>
+                <div className="text-xs text-ink-muted mt-0.5">{c.tagline}</div>
+                {active && (
+                  <Badge tone="brand" className="mt-3">
+                    Sélectionné
+                  </Badge>
+                )}
               </button>
-            </div>
-          )}
+            );
+          })}
+        </div>
+      </div>
 
-          {/* À payer */}
-          <section>
-            <div className="flex justify-between items-center mb-3">
-              <h3 className="text-base font-semibold" style={{ color: colors.text }}>
-                À payer
-              </h3>
-              <span className="text-xs" style={{ color: colors.warning }}>
-                {pendingBills.length} facture{pendingBills.length > 1 ? 's' : ''}
-              </span>
+      {/* Form + info side-by-side */}
+      {selected && cat && (
+        <div className="grid grid-cols-1 lg:grid-cols-3 gap-5 animate-slide-in">
+          <Card padding="md" className="lg:col-span-2">
+            <div className="flex items-center gap-3 mb-5 pb-4 border-b border-bg-border">
+              <div
+                className="w-11 h-11 rounded-xl flex items-center justify-center shrink-0"
+                style={{ background: cat.color }}
+              >
+                <cat.icon size={18} className="text-white" />
+              </div>
+              <div>
+                <h3 className="text-base font-bold">Payer la facture {cat.name}</h3>
+                <p className="text-xs text-ink-muted">{cat.tagline}</p>
+              </div>
             </div>
-            {pendingBills.length === 0 ? (
-              <div className="card p-6 text-center text-sm" style={{ color: colors.textSecondary }}>
-                Aucune facture en attente
+
+            <div className="space-y-4">
+              <Input
+                label="Numéro de contrat / abonné"
+                icon={FileText}
+                placeholder="Ex : 1234567890"
+                value={contract}
+                onChange={(e) => setContract(e.target.value)}
+              />
+              <div>
+                <label className="label">Montant à payer (Ar)</label>
+                <div className="relative">
+                  <input
+                    type="text"
+                    inputMode="numeric"
+                    value={amount}
+                    onChange={(e) => setAmount(e.target.value.replace(/[^\d.]/g, ''))}
+                    placeholder="0"
+                    className="input text-2xl font-bold py-4 pr-16"
+                  />
+                  <span className="absolute right-4 top-1/2 -translate-y-1/2 text-ink-dim text-sm font-semibold">
+                    Ar
+                  </span>
+                </div>
               </div>
-            ) : (
-              <div className="space-y-2">
-                {pendingBills.map((bill) => {
-                  const Icon = bill.icon;
-                  return (
-                    <div
-                      key={bill.id}
-                      className="flex items-center justify-between p-3 rounded-xl border"
-                      style={{
-                        background: `${colors.warning}15`,
-                        borderColor: colors.warning,
-                      }}
-                    >
-                      <div className="flex items-center gap-3 min-w-0">
-                        <div
-                          className="w-10 h-10 rounded-full flex items-center justify-center shrink-0"
-                          style={{ background: `${colors.warning}30` }}
-                        >
-                          <Icon size={20} style={{ color: colors.warning }} />
-                        </div>
-                        <div className="min-w-0">
-                          <div className="text-sm font-medium" style={{ color: colors.text }}>
-                            {bill.name}
-                          </div>
-                          <div className="text-xs" style={{ color: colors.textSecondary }}>
-                            À payer le {bill.dueDate}
-                          </div>
-                        </div>
-                      </div>
-                      <div className="flex flex-col items-end gap-1.5">
-                        <div className="text-sm font-semibold" style={{ color: colors.text }}>
-                          {bill.amount.toLocaleString('fr-FR')} Ar
-                        </div>
-                        <button
-                          onClick={() => setSelectedBill(bill.name.toLowerCase())}
-                          className="px-3 py-1 rounded-md border text-xs font-medium"
-                          style={{ borderColor: colors.warning, color: colors.warning }}
-                        >
-                          Payer
-                        </button>
-                      </div>
-                    </div>
-                  );
-                })}
+
+              <Button
+                variant="primary"
+                size="lg"
+                fullWidth
+                icon={Lock}
+                disabled={!contract || !amount || parseFloat(amount) <= 0}
+                onClick={pay}
+              >
+                Payer
+                {amount && parseFloat(amount) > 0 && (
+                  <span className="ml-1 opacity-80">
+                    · {parseFloat(amount).toLocaleString('fr-FR')} Ar
+                  </span>
+                )}
+              </Button>
+            </div>
+          </Card>
+
+          <Card padding="md">
+            <div className="flex items-center gap-2 mb-3">
+              <Info size={14} className="text-brand-300" />
+              <h3 className="text-sm font-bold">Comment ça marche</h3>
+            </div>
+            <ol className="space-y-3 text-xs text-ink-muted">
+              {[
+                'Trouvez votre numéro de contrat sur votre dernière facture',
+                'Saisissez le montant exact dû',
+                'Validez avec votre wallet — paiement instantané',
+                'Le justificatif arrive par email et dans l\'historique',
+              ].map((step, i) => (
+                <li key={i} className="flex gap-2.5">
+                  <span className="w-5 h-5 rounded-full bg-gradient-brand text-white text-[10px] font-bold flex items-center justify-center shrink-0">
+                    {i + 1}
+                  </span>
+                  <span className="leading-relaxed">{step}</span>
+                </li>
+              ))}
+            </ol>
+
+            <div className="mt-5 pt-4 border-t border-bg-border">
+              <div className="flex items-center gap-2 text-xs text-success-400">
+                <CheckCircle2 size={12} />
+                <span className="font-semibold">Sans frais supplémentaires</span>
               </div>
+              <div className="flex items-center gap-2 text-xs text-success-400 mt-1.5">
+                <CheckCircle2 size={12} />
+                <span className="font-semibold">Confirmation immédiate</span>
+              </div>
+            </div>
+          </Card>
+        </div>
+      )}
+
+      {/* Pending bills */}
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-5">
+        <Card padding="md">
+          <div className="flex items-center justify-between mb-4">
+            <div className="flex items-center gap-2">
+              <Clock size={16} className="text-warning-400" />
+              <h3 className="text-base font-bold">À payer</h3>
+            </div>
+            {pending.length > 0 && (
+              <Badge tone="warning">{pending.length}</Badge>
             )}
-          </section>
-
-          {/* Payées récemment */}
-          {paidBills.length > 0 && (
-            <section>
-              <h3 className="text-base font-semibold mb-3" style={{ color: colors.text }}>
-                Payées récemment
-              </h3>
-              <div className="space-y-2">
-                {paidBills.map((bill) => (
-                  <div key={bill.id} className="card flex justify-between items-center p-3">
-                    <div className="flex items-center gap-3 min-w-0">
-                      <div
-                        className="w-10 h-10 rounded-full flex items-center justify-center shrink-0"
-                        style={{ background: `${colors.success}20` }}
-                      >
-                        <CheckCircle2 size={20} style={{ color: colors.success }} />
-                      </div>
-                      <div className="min-w-0">
-                        <div className="text-sm font-medium" style={{ color: colors.text }}>
-                          {bill.name}
-                        </div>
-                        <div className="text-xs" style={{ color: colors.textSecondary }}>
-                          Payée le {bill.paidDate}
-                        </div>
+          </div>
+          {pending.length === 0 ? (
+            <Empty
+              icon={CheckCircle2}
+              title="Tout est à jour"
+              description="Aucune facture en attente de paiement"
+              className="py-10"
+            />
+          ) : (
+            <div className="space-y-2">
+              {pending.map((b) => {
+                const Icon = b.icon;
+                return (
+                  <div
+                    key={b.id}
+                    className="flex items-center gap-3 p-3 rounded-xl border border-warning-500/30 bg-warning-bg"
+                  >
+                    <div className="w-10 h-10 rounded-xl bg-warning-500/30 flex items-center justify-center shrink-0 text-warning-400">
+                      <Icon size={16} />
+                    </div>
+                    <div className="flex-1 min-w-0">
+                      <div className="text-sm font-bold truncate">{b.name}</div>
+                      <div className="text-[11px] text-ink-muted flex items-center gap-1 mt-0.5">
+                        <Calendar size={10} />
+                        Échéance {b.dueDate}
                       </div>
                     </div>
-                    <div className="text-sm font-semibold" style={{ color: colors.success }}>
-                      {bill.amount.toLocaleString('fr-FR')} Ar
+                    <div className="text-right">
+                      <div className="text-sm font-bold">
+                        {b.amount.toLocaleString('fr-FR')} Ar
+                      </div>
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        className="mt-1 text-warning-400 hover:bg-warning-500/20"
+                        onClick={() => setSelected(b.category)}
+                      >
+                        Payer
+                      </Button>
                     </div>
                   </div>
-                ))}
-              </div>
-            </section>
+                );
+              })}
+            </div>
           )}
-        </div>
+        </Card>
+
+        <Card padding="md">
+          <div className="flex items-center gap-2 mb-4">
+            <Receipt size={16} className="text-success-400" />
+            <h3 className="text-base font-bold">Payées récemment</h3>
+          </div>
+          {paid.length === 0 ? (
+            <Empty
+              icon={Receipt}
+              title="Pas d'historique"
+              description="Vos factures payées apparaîtront ici"
+              className="py-10"
+            />
+          ) : (
+            <div className="space-y-2">
+              {paid.map((b) => (
+                <div
+                  key={b.id}
+                  className="flex items-center gap-3 p-3 rounded-xl bg-bg-elevated/40 border border-bg-border"
+                >
+                  <div className="w-10 h-10 rounded-xl bg-success-bg flex items-center justify-center shrink-0 text-success-400">
+                    <CheckCircle2 size={16} />
+                  </div>
+                  <div className="flex-1 min-w-0">
+                    <div className="text-sm font-medium truncate">{b.name}</div>
+                    <div className="text-[11px] text-ink-muted">
+                      Payée le {b.paidDate}
+                    </div>
+                  </div>
+                  <div className="text-sm font-bold text-success-400">
+                    {b.amount.toLocaleString('fr-FR')} Ar
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+        </Card>
       </div>
     </div>
   );

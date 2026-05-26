@@ -2,23 +2,21 @@ import {
   ArrowLeft,
   ArrowRight,
   CheckCircle2,
-  ChevronLeft,
   Eye,
   EyeOff,
-  Loader2,
-  Lock,
-  LockKeyhole,
+  KeyRound,
   Mail,
-  MessageSquareText,
+  MessageSquare,
   Phone,
-  Wallet,
 } from 'lucide-react';
-import { useRef, useState } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useEffect, useRef, useState } from 'react';
+import { Link, useNavigate } from 'react-router-dom';
+import AuthLayout from '../../components/AuthLayout';
 import ErrorModal from '../../components/ErrorModal';
 import { useAuth } from '../../contexts/AuthContext';
 import { authService } from '../../services/api';
 import { asyncStorage, secureStorage } from '../../services/storage';
+import { Button, Input } from '../../ui';
 
 type Step = 'identifier' | 'method' | 'password' | 'otp';
 type Mode = 'phone' | 'email';
@@ -28,121 +26,112 @@ export default function Login() {
   const { login, setUser } = useAuth();
 
   const [step, setStep] = useState<Step>('identifier');
-  const [loginMode, setLoginMode] = useState<Mode>('phone');
-  const [phoneNumber, setPhoneNumber] = useState('');
+  const [mode, setMode] = useState<Mode>('phone');
+  const [phone, setPhone] = useState('');
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
-  const [otpCode, setOtpCode] = useState<string[]>(['', '', '', '', '', '']);
-  const [showPassword, setShowPassword] = useState(false);
+  const [otp, setOtp] = useState<string[]>(['', '', '', '', '', '']);
+  const [showPwd, setShowPwd] = useState(false);
   const [loading, setLoading] = useState(false);
   const [timer, setTimer] = useState(60);
   const [canResend, setCanResend] = useState(false);
   const [userId, setUserId] = useState('');
 
-  const [showError, setShowError] = useState(false);
+  const [errorOpen, setErrorOpen] = useState(false);
   const [errorMsg, setErrorMsg] = useState('');
   const otpRefs = useRef<(HTMLInputElement | null)[]>([]);
 
-  const triggerError = (msg: string) => {
+  const fail = (msg: string) => {
     setErrorMsg(msg);
-    setShowError(true);
+    setErrorOpen(true);
   };
 
-  const getFullPhoneNumber = () => {
-    const clean = phoneNumber.replace(/\s/g, '');
-    return clean.startsWith('+') ? clean : `+261${clean}`;
+  const fullPhone = () => {
+    const c = phone.replace(/\s/g, '');
+    return c.startsWith('+') ? c : `+261${c}`;
   };
 
-  const formatPhone = (text: string) => {
-    let cleaned = text.replace(/\D/g, '');
-    if (cleaned.length > 10) cleaned = cleaned.slice(0, 10);
-    if (cleaned.length > 2) {
-      return `${cleaned.slice(0, 2)} ${cleaned.slice(2, 4)} ${cleaned.slice(4, 6)} ${cleaned.slice(6, 8)} ${cleaned.slice(8, 10)}`.trim();
-    }
-    return cleaned;
+  const formatPhone = (v: string) => {
+    let c = v.replace(/\D/g, '').slice(0, 10);
+    if (c.length > 2)
+      return `${c.slice(0, 2)} ${c.slice(2, 4)} ${c.slice(4, 6)} ${c.slice(6, 8)} ${c.slice(8, 10)}`.trim();
+    return c;
   };
 
-  const checkAccountExists = async () => {
-    const identifier = loginMode === 'phone' ? getFullPhoneNumber() : email;
-    if (loginMode === 'phone' && phoneNumber.length < 9) {
-      triggerError('Numéro de téléphone invalide');
-      return;
-    }
-    if (loginMode === 'email' && (!email.includes('@') || !email.includes('.'))) {
-      triggerError('Email invalide');
-      return;
-    }
+  const identifierValue = mode === 'phone' ? phone : email;
+  const canNext = !!identifierValue;
+
+  const checkAccount = async () => {
+    if (mode === 'phone' && phone.length < 9) return fail('Numéro de téléphone invalide');
+    if (mode === 'email' && (!email.includes('@') || !email.includes('.')))
+      return fail('Email invalide');
     setLoading(true);
     try {
-      const response = await authService.checkAccount({
-        [loginMode === 'phone' ? 'telephone' : 'email']: identifier,
+      const identifier = mode === 'phone' ? fullPhone() : email;
+      const r = await authService.checkAccount({
+        [mode === 'phone' ? 'telephone' : 'email']: identifier,
       });
-      if (response.exists) {
-        setUserId(response.userId);
+      if (r.exists) {
+        setUserId(r.userId);
         setStep('method');
       } else {
         navigate('/auth/register');
       }
     } catch {
-      triggerError('Erreur lors de la vérification');
+      fail('Erreur lors de la vérification');
     } finally {
       setLoading(false);
     }
   };
 
   const sendOTP = async () => {
-    const identifier = loginMode === 'phone' ? getFullPhoneNumber() : email;
     setLoading(true);
     try {
+      const identifier = mode === 'phone' ? fullPhone() : email;
       await authService.sendOTP({
-        [loginMode === 'phone' ? 'telephone' : 'email']: identifier,
+        [mode === 'phone' ? 'telephone' : 'email']: identifier,
       });
       setStep('otp');
       startTimer();
     } catch {
-      triggerError("Erreur lors de l'envoi du code");
+      fail("Erreur lors de l'envoi du code");
     } finally {
       setLoading(false);
     }
   };
 
   const verifyOTP = async () => {
-    const code = otpCode.join('');
-    if (code.length !== 6) {
-      triggerError('Veuillez entrer le code à 6 chiffres');
-      return;
-    }
+    const code = otp.join('');
+    if (code.length !== 6) return fail('Veuillez entrer le code à 6 chiffres');
     setLoading(true);
     try {
-      const response = await authService.verifyOTP({ code, userId });
-      if (response?.accessToken) {
-        await secureStorage.setItem('accessToken', response.accessToken);
-        await secureStorage.setItem('refreshToken', response.refreshToken);
-        if (response.user) {
-          await asyncStorage.setItem('user', JSON.stringify(response.user));
-          setUser(response.user);
+      const r = await authService.verifyOTP({ code, userId });
+      if (r?.accessToken) {
+        await secureStorage.setItem('accessToken', r.accessToken);
+        await secureStorage.setItem('refreshToken', r.refreshToken);
+        if (r.user) {
+          await asyncStorage.setItem('user', JSON.stringify(r.user));
+          setUser(r.user);
         }
       }
       navigate('/dashboard', { replace: true });
     } catch {
-      triggerError('Code invalide');
+      fail('Code invalide');
     } finally {
       setLoading(false);
     }
   };
 
-  const handlePasswordLogin = async () => {
-    if (!password) {
-      triggerError('Veuillez entrer votre mot de passe');
-      return;
-    }
+  const handlePwdLogin = async (e?: React.FormEvent) => {
+    e?.preventDefault();
+    if (!password) return fail('Veuillez entrer votre mot de passe');
     setLoading(true);
     try {
-      const identifier = loginMode === 'phone' ? getFullPhoneNumber() : email;
+      const identifier = mode === 'phone' ? fullPhone() : email;
       await login(identifier, password);
       navigate('/dashboard', { replace: true });
     } catch {
-      triggerError('Mot de passe incorrect');
+      fail('Mot de passe incorrect');
     } finally {
       setLoading(false);
     }
@@ -151,336 +140,298 @@ export default function Login() {
   const startTimer = () => {
     setTimer(60);
     setCanResend(false);
-    const interval = setInterval(() => {
-      setTimer((prev) => {
-        if (prev <= 1) {
-          clearInterval(interval);
+    const id = setInterval(() => {
+      setTimer((p) => {
+        if (p <= 1) {
+          clearInterval(id);
           setCanResend(true);
           return 0;
         }
-        return prev - 1;
+        return p - 1;
       });
     }, 1000);
   };
 
-  const handleOtpChange = (text: string, index: number) => {
-    const digit = text.replace(/\D/g, '').slice(-1);
-    const next = [...otpCode];
-    next[index] = digit;
-    setOtpCode(next);
-    if (digit && index < 5) otpRefs.current[index + 1]?.focus();
+  const onOtpChange = (val: string, idx: number) => {
+    const d = val.replace(/\D/g, '').slice(-1);
+    const next = [...otp];
+    next[idx] = d;
+    setOtp(next);
+    if (d && idx < 5) otpRefs.current[idx + 1]?.focus();
+  };
+  const onOtpKey = (e: React.KeyboardEvent<HTMLInputElement>, idx: number) => {
+    if (e.key === 'Backspace' && !otp[idx] && idx > 0) otpRefs.current[idx - 1]?.focus();
   };
 
-  const handleOtpKey = (e: React.KeyboardEvent<HTMLInputElement>, index: number) => {
-    if (e.key === 'Backspace' && !otpCode[index] && index > 0) {
-      otpRefs.current[index - 1]?.focus();
-    }
+  // Auto-focus otp first cell when entering step
+  useEffect(() => {
+    if (step === 'otp') otpRefs.current[0]?.focus();
+  }, [step]);
+
+  const subtitleByStep = {
+    identifier: 'Connectez-vous à votre compte M\'Paye',
+    method: 'Comment voulez-vous vous identifier ?',
+    password: 'Saisissez votre mot de passe',
+    otp: `Code envoyé à ${mode === 'phone' ? phone : email}`,
   };
-
-  const subtitle = {
-    identifier: 'Connectez-vous à votre compte',
-    method: 'Choisissez votre méthode',
-    password: 'Entrez votre mot de passe',
-    otp: 'Saisissez le code reçu',
-  }[step];
-
-  const identifierValue = loginMode === 'phone' ? phoneNumber : email;
-  const canNext = !!identifierValue;
 
   return (
-    <div className="min-h-screen relative bg-bg text-white overflow-hidden">
-      <div className="absolute inset-x-0 top-0 h-[350px] bg-gradient-to-b from-[#1e3a8a33] to-transparent pointer-events-none" />
-      <div className="relative max-w-md mx-auto px-5 pt-14 pb-10">
-        <button
-          onClick={() => navigate(-1)}
-          className="w-10 h-10 rounded-full bg-white/10 flex items-center justify-center mb-5"
-          type="button"
-        >
-          <ChevronLeft size={22} />
-        </button>
-
-        <div className="flex flex-col items-center mb-9">
-          <div className="w-22 h-22 rounded-3xl bg-gradient-primary flex items-center justify-center mb-4 shadow-glow-blue p-5">
-            <Wallet size={42} className="text-white" />
-          </div>
-          <div className="text-3xl font-extrabold tracking-wide mb-1">M'Paye</div>
-          <div className="text-sm text-slate-400 font-medium">{subtitle}</div>
-        </div>
-
-        {step === 'identifier' && (
+    <AuthLayout
+      title="Bon retour"
+      subtitle={subtitleByStep[step]}
+      footer={
+        step === 'identifier' ? (
           <>
-            <div className="flex gap-1 bg-bg-card border border-bg-border rounded-full p-1 mb-6">
-              <button
-                type="button"
-                onClick={() => setLoginMode('phone')}
-                className={`flex-1 flex items-center justify-center gap-2 py-2.5 rounded-full text-sm font-semibold transition-all ${
-                  loginMode === 'phone'
-                    ? 'bg-gradient-primary text-white shadow-glow-blue'
-                    : 'text-slate-400'
-                }`}
-              >
-                <Phone size={16} />
-                Téléphone
-              </button>
-              <button
-                type="button"
-                onClick={() => setLoginMode('email')}
-                className={`flex-1 flex items-center justify-center gap-2 py-2.5 rounded-full text-sm font-semibold transition-all ${
-                  loginMode === 'email'
-                    ? 'bg-gradient-primary text-white shadow-glow-blue'
-                    : 'text-slate-400'
-                }`}
-              >
-                <Mail size={16} />
-                E-mail
-              </button>
-            </div>
+            Pas encore de compte ?{' '}
+            <Link to="/auth/register" className="text-brand-300 font-semibold hover:text-brand-200">
+              Créer un compte
+            </Link>
+          </>
+        ) : null
+      }
+    >
+      {step === 'identifier' && (
+        <form
+          onSubmit={(e) => {
+            e.preventDefault();
+            void checkAccount();
+          }}
+          className="space-y-4"
+        >
+          {/* Mode tabs */}
+          <div className="grid grid-cols-2 gap-1 p-1 bg-bg-elevated/50 rounded-xl border border-bg-border">
+            {[
+              { id: 'phone' as Mode, label: 'Téléphone', icon: Phone },
+              { id: 'email' as Mode, label: 'Email', icon: Mail },
+            ].map((t) => {
+              const Icon = t.icon;
+              const active = mode === t.id;
+              return (
+                <button
+                  type="button"
+                  key={t.id}
+                  onClick={() => setMode(t.id)}
+                  className={`flex items-center justify-center gap-2 py-2 rounded-lg text-sm font-semibold transition-all ${
+                    active
+                      ? 'bg-gradient-brand text-white shadow-glow-soft'
+                      : 'text-ink-muted hover:text-ink'
+                  }`}
+                >
+                  <Icon size={15} />
+                  {t.label}
+                </button>
+              );
+            })}
+          </div>
 
-            {loginMode === 'phone' ? (
-              <div className="flex items-center bg-bg-card border border-bg-border rounded-2xl overflow-hidden mb-4">
-                <div className="px-4 py-4 bg-primary/10 border-r border-bg-border">
-                  <span className="text-accent-violet font-bold">+261</span>
+          {mode === 'phone' ? (
+            <div>
+              <label className="label">Numéro de téléphone</label>
+              <div className="flex">
+                <div className="px-3 flex items-center bg-bg-elevated border border-bg-border border-r-0 rounded-l-xl text-brand-300 font-bold text-sm">
+                  +261
                 </div>
                 <input
                   type="tel"
-                  className="flex-1 bg-transparent px-4 py-4 text-white font-medium outline-none placeholder:text-slate-500"
-                  placeholder="32 12 345 67"
-                  value={phoneNumber}
-                  onChange={(e) => setPhoneNumber(formatPhone(e.target.value))}
                   inputMode="numeric"
+                  autoComplete="tel"
+                  autoFocus
+                  placeholder="32 12 345 67"
+                  value={phone}
+                  onChange={(e) => setPhone(formatPhone(e.target.value))}
+                  className="input rounded-l-none flex-1"
                 />
               </div>
-            ) : (
-              <div className="flex items-center bg-bg-card border border-bg-border rounded-2xl px-4 mb-4">
-                <Mail size={20} className="text-slate-500 mr-2" />
-                <input
-                  type="email"
-                  className="flex-1 bg-transparent py-4 text-white font-medium outline-none placeholder:text-slate-500"
-                  placeholder="Adresse e-mail"
-                  value={email}
-                  onChange={(e) => setEmail(e.target.value.trim())}
-                  autoCapitalize="none"
-                />
-              </div>
-            )}
-
-            <button
-              type="button"
-              onClick={checkAccountExists}
-              disabled={loading || !canNext}
-              className={`w-full flex items-center justify-center gap-2 py-4 rounded-2xl font-bold text-white transition-all ${
-                canNext ? 'bg-gradient-button shadow-glow-blue' : 'bg-slate-600'
-              } ${loading ? 'opacity-70' : ''}`}
-            >
-              {loading ? (
-                <Loader2 className="animate-spin" size={20} />
-              ) : (
-                <>
-                  Suivant
-                  <ArrowRight size={18} />
-                </>
-              )}
-            </button>
-
-            <div className="flex justify-center items-center gap-3 mt-5 text-sm">
-              <button
-                type="button"
-                className="text-accent-violet font-semibold"
-                onClick={() => navigate('/auth/register')}
-              >
-                Créer un compte
-              </button>
-              <span className="text-slate-600">•</span>
-              <button
-                type="button"
-                className="text-accent-violet font-semibold"
-                onClick={() => navigate('/auth/forgot-password')}
-              >
-                Récupérer un compte
-              </button>
             </div>
-          </>
-        )}
+          ) : (
+            <Input
+              label="Adresse email"
+              type="email"
+              icon={Mail}
+              autoComplete="email"
+              autoFocus
+              placeholder="nom@exemple.com"
+              value={email}
+              onChange={(e) => setEmail(e.target.value.trim())}
+            />
+          )}
 
-        {step === 'method' && (
-          <>
-            <button
-              type="button"
-              onClick={sendOTP}
-              className="w-full flex items-center bg-bg-card border border-bg-border rounded-2xl p-4 mb-3"
+          <Button
+            type="submit"
+            variant="primary"
+            size="lg"
+            fullWidth
+            loading={loading}
+            disabled={!canNext}
+            iconEnd={ArrowRight}
+          >
+            Continuer
+          </Button>
+
+          <div className="text-center">
+            <Link
+              to="/auth/forgot-password"
+              className="text-xs text-ink-muted hover:text-ink"
             >
-              <div className="w-12 h-12 rounded-2xl bg-gradient-to-br from-[#60a5fa] to-[#3b82f6] flex items-center justify-center mr-3">
-                <MessageSquareText size={22} className="text-white" />
-              </div>
-              <div className="flex-1 text-left">
-                <div className="text-white font-bold">Code SMS</div>
-                <div className="text-xs text-slate-400 mt-0.5">Recevez un code à 6 chiffres</div>
-              </div>
-              <ArrowRight size={20} className="text-slate-500" />
-            </button>
+              Mot de passe oublié ?
+            </Link>
+          </div>
+        </form>
+      )}
 
-            <button
-              type="button"
-              onClick={() => setStep('password')}
-              className="w-full flex items-center bg-bg-card border border-bg-border rounded-2xl p-4 mb-3"
-            >
-              <div className="w-12 h-12 rounded-2xl bg-gradient-primary flex items-center justify-center mr-3">
-                <Lock size={22} className="text-white" />
-              </div>
-              <div className="flex-1 text-left">
-                <div className="text-white font-bold">Mot de passe</div>
-                <div className="text-xs text-slate-400 mt-0.5">Utilisez votre mot de passe</div>
-              </div>
-              <ArrowRight size={20} className="text-slate-500" />
-            </button>
-
-            <button
-              type="button"
-              onClick={() => setStep('identifier')}
-              className="w-full flex items-center justify-center gap-2 mt-4 py-2.5 text-accent-violet text-sm font-semibold"
-            >
-              <ArrowLeft size={16} />
-              Retour
-            </button>
-          </>
-        )}
-
-        {step === 'password' && (
-          <>
-            <div className="flex items-center bg-bg-card border border-bg-border rounded-2xl px-4 mb-4">
-              <Lock size={20} className="text-slate-500 mr-2" />
-              <input
-                type={showPassword ? 'text' : 'password'}
-                className="flex-1 bg-transparent py-4 text-white font-medium outline-none placeholder:text-slate-500"
-                placeholder="Mot de passe"
-                value={password}
-                onChange={(e) => setPassword(e.target.value)}
-              />
-              <button type="button" onClick={() => setShowPassword((v) => !v)}>
-                {showPassword ? (
-                  <EyeOff size={20} className="text-slate-500" />
-                ) : (
-                  <Eye size={20} className="text-slate-500" />
-                )}
-              </button>
-            </div>
-
-            <div className="text-right mb-5">
+      {step === 'method' && (
+        <div className="space-y-2.5">
+          {[
+            {
+              key: 'otp' as const,
+              icon: MessageSquare,
+              title: 'Code de vérification',
+              desc: 'Recevoir un code à 6 chiffres',
+              onClick: () => void sendOTP(),
+            },
+            {
+              key: 'password' as const,
+              icon: KeyRound,
+              title: 'Mot de passe',
+              desc: 'Utiliser votre mot de passe habituel',
+              onClick: () => setStep('password'),
+            },
+          ].map((m) => {
+            const Icon = m.icon;
+            return (
               <button
-                type="button"
-                onClick={() => navigate('/auth/forgot-password')}
-                className="text-accent-violet text-xs font-semibold"
+                key={m.key}
+                onClick={m.onClick}
+                disabled={loading}
+                className="card-interactive w-full p-4 text-left flex items-center gap-3"
               >
-                Mot de passe oublié ?
+                <div className="w-11 h-11 rounded-xl bg-gradient-brand-soft border border-brand-500/20 flex items-center justify-center shrink-0">
+                  <Icon size={20} className="text-brand-300" />
+                </div>
+                <div className="flex-1 min-w-0">
+                  <div className="font-bold text-sm">{m.title}</div>
+                  <div className="text-xs text-ink-muted mt-0.5">{m.desc}</div>
+                </div>
+                <ArrowRight size={16} className="text-ink-dim" />
               </button>
-            </div>
+            );
+          })}
 
-            <button
-              type="button"
-              onClick={handlePasswordLogin}
-              disabled={loading || !password}
-              className={`w-full flex items-center justify-center gap-2 py-4 rounded-2xl font-bold text-white transition-all ${
-                password ? 'bg-gradient-button shadow-glow-blue' : 'bg-slate-600'
-              } ${loading ? 'opacity-70' : ''}`}
+          <Button
+            variant="ghost"
+            size="sm"
+            icon={ArrowLeft}
+            onClick={() => setStep('identifier')}
+            className="mt-3"
+          >
+            Retour
+          </Button>
+        </div>
+      )}
+
+      {step === 'password' && (
+        <form onSubmit={handlePwdLogin} className="space-y-4">
+          <Input
+            label="Mot de passe"
+            type={showPwd ? 'text' : 'password'}
+            icon={KeyRound}
+            iconEnd={showPwd ? EyeOff : Eye}
+            onIconEndClick={() => setShowPwd((v) => !v)}
+            autoComplete="current-password"
+            autoFocus
+            value={password}
+            onChange={(e) => setPassword(e.target.value)}
+          />
+          <Button
+            type="submit"
+            variant="primary"
+            size="lg"
+            fullWidth
+            loading={loading}
+            disabled={!password}
+          >
+            Se connecter
+          </Button>
+          <div className="flex items-center justify-between text-xs">
+            <Link
+              to="/auth/forgot-password"
+              className="text-brand-300 font-semibold hover:text-brand-200"
             >
-              {loading ? (
-                <Loader2 className="animate-spin" size={20} />
-              ) : (
-                <>
-                  <LockKeyhole size={18} />
-                  Se connecter
-                </>
-              )}
-            </button>
-
+              Mot de passe oublié ?
+            </Link>
             <button
               type="button"
               onClick={() => setStep('method')}
-              className="w-full flex items-center justify-center gap-2 mt-4 py-2.5 text-accent-violet text-sm font-semibold"
+              className="text-ink-muted hover:text-ink"
             >
-              <ArrowLeft size={16} />
-              Retour
+              ← Retour
             </button>
-          </>
-        )}
+          </div>
+        </form>
+      )}
 
-        {step === 'otp' && (
-          <>
-            <div className="text-xl font-extrabold text-center mb-2">Vérification</div>
-            <div className="text-sm text-slate-400 text-center mb-7">
-              Nous avons envoyé un code à
-              <br />
-              <span className="text-accent-violet font-bold">
-                {loginMode === 'phone' ? phoneNumber : email}
-              </span>
-            </div>
-
-            <div className="flex justify-between gap-2 mb-6">
-              {otpCode.map((digit, index) => (
+      {step === 'otp' && (
+        <div className="space-y-5">
+          <div>
+            <label className="label text-center">Code à 6 chiffres</label>
+            <div className="grid grid-cols-6 gap-2">
+              {otp.map((d, i) => (
                 <input
-                  key={index}
-                  ref={(el) => (otpRefs.current[index] = el)}
-                  value={digit}
-                  onChange={(e) => handleOtpChange(e.target.value, index)}
-                  onKeyDown={(e) => handleOtpKey(e, index)}
+                  key={i}
+                  ref={(el) => (otpRefs.current[i] = el)}
+                  value={d}
+                  onChange={(e) => onOtpChange(e.target.value, i)}
+                  onKeyDown={(e) => onOtpKey(e, i)}
                   inputMode="numeric"
                   maxLength={1}
-                  className="flex-1 h-14 bg-bg-card border border-bg-border rounded-2xl text-white text-2xl font-bold text-center outline-none focus:border-accent-violet"
+                  className="aspect-square text-center text-xl font-bold bg-bg-elevated border border-bg-border rounded-xl outline-none focus:border-brand-500 focus:ring-2 focus:ring-brand-500/20"
                 />
               ))}
             </div>
+          </div>
 
-            <div className="text-center mb-6">
-              {!canResend ? (
-                <span className="text-slate-400 text-sm">
-                  Renvoyer dans <span className="text-accent-violet font-bold">{timer}</span> secondes
-                </span>
-              ) : (
-                <button
-                  type="button"
-                  onClick={sendOTP}
-                  className="text-accent-violet font-semibold text-sm"
-                >
-                  Renvoyer le code
-                </button>
-              )}
-            </div>
+          <div className="text-center text-xs">
+            {!canResend ? (
+              <span className="text-ink-muted">
+                Renvoyer dans{' '}
+                <span className="text-brand-300 font-bold">{timer}s</span>
+              </span>
+            ) : (
+              <button
+                type="button"
+                onClick={() => void sendOTP()}
+                className="text-brand-300 font-semibold hover:text-brand-200"
+              >
+                Renvoyer le code
+              </button>
+            )}
+          </div>
 
-            <button
-              type="button"
-              onClick={verifyOTP}
-              disabled={loading || otpCode.join('').length !== 6}
-              className={`w-full flex items-center justify-center gap-2 py-4 rounded-2xl font-bold text-white transition-all ${
-                otpCode.join('').length === 6 ? 'bg-gradient-button shadow-glow-blue' : 'bg-slate-600'
-              } ${loading ? 'opacity-70' : ''}`}
-            >
-              {loading ? (
-                <Loader2 className="animate-spin" size={20} />
-              ) : (
-                <>
-                  <CheckCircle2 size={18} />
-                  Vérifier
-                </>
-              )}
-            </button>
+          <Button
+            variant="primary"
+            size="lg"
+            fullWidth
+            loading={loading}
+            disabled={otp.join('').length !== 6}
+            icon={CheckCircle2}
+            onClick={() => void verifyOTP()}
+          >
+            Vérifier et se connecter
+          </Button>
 
-            <button
-              type="button"
-              onClick={() => setStep('method')}
-              className="w-full flex items-center justify-center gap-2 mt-4 py-2.5 text-accent-violet text-sm font-semibold"
-            >
-              <ArrowLeft size={16} />
-              Retour
-            </button>
-          </>
-        )}
-      </div>
+          <Button
+            variant="ghost"
+            size="sm"
+            icon={ArrowLeft}
+            onClick={() => setStep('method')}
+            className="mx-auto block"
+          >
+            Retour
+          </Button>
+        </div>
+      )}
 
-      <ErrorModal
-        open={showError}
-        message={errorMsg}
-        onClose={() => setShowError(false)}
-      />
-    </div>
+      <ErrorModal open={errorOpen} message={errorMsg} onClose={() => setErrorOpen(false)} />
+    </AuthLayout>
   );
 }

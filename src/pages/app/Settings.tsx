@@ -2,22 +2,25 @@ import {
   Bell,
   Eye,
   Globe,
+  KeyRound,
   Lock,
   LogOut,
   Mail,
   Monitor,
   Moon,
+  Palette,
   Smartphone,
   Sun,
+  User as UserIcon,
   type LucideIcon,
 } from 'lucide-react';
 import { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import GradientHeader from '../../components/GradientHeader';
 import { useAuth } from '../../contexts/AuthContext';
 import { useLocale } from '../../contexts/LocaleContext';
 import { useColors, useTheme, type ThemeMode } from '../../contexts/ThemeContext';
 import { userPreferencesService } from '../../services/api';
+import { Avatar, Card, PageHeader } from '../../ui';
 
 interface Preferences {
   notifEmail: boolean;
@@ -41,12 +44,24 @@ const DEFAULT_PREFS: Preferences = {
   theme: 'dark',
 };
 
+type Section = 'appearance' | 'language' | 'notifications' | 'privacy' | 'account';
+
+const SECTIONS: { id: Section; label: string; icon: LucideIcon }[] = [
+  { id: 'appearance', label: 'Apparence', icon: Palette },
+  { id: 'language', label: 'Langue & région', icon: Globe },
+  { id: 'notifications', label: 'Notifications', icon: Bell },
+  { id: 'privacy', label: 'Vie privée', icon: Eye },
+  { id: 'account', label: 'Compte', icon: UserIcon },
+];
+
 export default function Settings() {
   const navigate = useNavigate();
   const colors = useColors();
   const { mode, setMode } = useTheme();
   const { logout, user } = useAuth();
   const { locale, setLocale } = useLocale();
+
+  const [section, setSection] = useState<Section>('appearance');
   const [prefs, setPrefs] = useState<Preferences>(DEFAULT_PREFS);
 
   useEffect(() => {
@@ -57,13 +72,13 @@ export default function Settings() {
         if (data?.theme && ['light', 'dark', 'system'].includes(data.theme)) {
           setMode(data.theme as ThemeMode);
         }
-      } catch (e: any) {
-        console.warn('Préférences indisponibles, valeurs par défaut.', e?.response?.data?.message);
+      } catch {
+        /* */
       }
     })();
   }, [setMode]);
 
-  const savePref = async (patch: Partial<Preferences>) => {
+  const save = async (patch: Partial<Preferences>) => {
     const prev = prefs;
     const next = { ...prefs, ...patch };
     setPrefs(next);
@@ -72,275 +87,308 @@ export default function Settings() {
       setPrefs({ ...DEFAULT_PREFS, ...saved });
     } catch (e: any) {
       setPrefs(prev);
-      alert(e?.response?.data?.message || 'Impossible de sauvegarder la préférence');
+      alert(e?.response?.data?.message || 'Erreur de sauvegarde');
     }
   };
 
-  const handleThemeChange = (newMode: ThemeMode) => {
-    setMode(newMode);
-    void savePref({ theme: newMode });
+  const setTheme = (m: ThemeMode) => {
+    setMode(m);
+    void save({ theme: m });
   };
 
-  const handleLanguageChange = (lang: 'fr' | 'en') => {
-    setLocale(lang);
-    void savePref({ language: lang });
+  const setLang = (l: 'fr' | 'en') => {
+    setLocale(l);
+    void save({ language: l });
   };
 
   const handleLogout = async () => {
-    if (!confirm('Voulez-vous vraiment vous déconnecter ?')) return;
+    if (!confirm('Vous déconnecter ?')) return;
     await logout();
     navigate('/auth/login', { replace: true });
   };
 
+  const fullName = `${user?.prenom || ''} ${user?.nom || ''}`.trim() || user?.email || 'Utilisateur';
+
   return (
-    <div className="min-h-screen bg-bg pb-8">
-      <div className="max-w-2xl mx-auto">
-        <GradientHeader title="Paramètres" subtitle={user?.email} />
+    <div className="space-y-6 animate-fade-in">
+      <PageHeader
+        title="Paramètres"
+        subtitle="Personnalisez votre expérience M'Paye"
+      />
 
-        <div className="px-5 mt-4 space-y-5">
-          {/* Apparence */}
-          <Section title="Apparence" colors={colors}>
-            <div className="flex gap-2">
-              <ThemeButton
-                active={mode === 'light'}
-                icon={Sun}
-                label="Clair"
-                onClick={() => handleThemeChange('light')}
-                colors={colors}
-              />
-              <ThemeButton
-                active={mode === 'dark'}
-                icon={Moon}
-                label="Sombre"
-                onClick={() => handleThemeChange('dark')}
-                colors={colors}
-              />
-              <ThemeButton
-                active={mode === 'system'}
-                icon={Monitor}
-                label="Système"
-                onClick={() => handleThemeChange('system')}
-                colors={colors}
-              />
+      <div className="grid grid-cols-1 lg:grid-cols-4 gap-5">
+        {/* ===== Sidebar nav ===== */}
+        <Card padding="md" className="lg:col-span-1 lg:sticky lg:top-20 lg:self-start">
+          <div className="flex items-center gap-3 pb-3 mb-3 border-b border-bg-border">
+            <Avatar name={fullName} size="sm" />
+            <div className="min-w-0">
+              <div className="text-sm font-bold truncate">{fullName}</div>
+              <div className="text-[11px] text-ink-muted truncate">{user?.email}</div>
             </div>
-          </Section>
+          </div>
 
-          {/* Langue */}
-          <Section title="Langue" colors={colors}>
-            <div className="flex gap-2">
-              <button
-                onClick={() => handleLanguageChange('fr')}
-                className="flex-1 flex items-center justify-center gap-2 py-2.5 rounded-xl border text-sm font-medium"
-                style={{
-                  borderColor: locale === 'fr' ? colors.primary : colors.border,
-                  background: locale === 'fr' ? colors.primary : 'transparent',
-                  color: locale === 'fr' ? '#fff' : colors.text,
-                }}
-              >
-                <Globe size={16} />
-                Français
-              </button>
-              <button
-                onClick={() => handleLanguageChange('en')}
-                className="flex-1 flex items-center justify-center gap-2 py-2.5 rounded-xl border text-sm font-medium"
-                style={{
-                  borderColor: locale === 'en' ? colors.primary : colors.border,
-                  background: locale === 'en' ? colors.primary : 'transparent',
-                  color: locale === 'en' ? '#fff' : colors.text,
-                }}
-              >
-                <Globe size={16} />
-                English
-              </button>
-            </div>
-          </Section>
+          <nav className="space-y-1">
+            {SECTIONS.map((s) => {
+              const Icon = s.icon;
+              const active = section === s.id;
+              return (
+                <button
+                  key={s.id}
+                  onClick={() => setSection(s.id)}
+                  className={`w-full flex items-center gap-2.5 px-3 py-2 rounded-xl text-sm font-medium transition-colors ${
+                    active
+                      ? 'bg-gradient-brand-soft text-ink border border-brand-500/30'
+                      : 'text-ink-muted hover:text-ink hover:bg-bg-subtle border border-transparent'
+                  }`}
+                >
+                  <Icon size={15} />
+                  {s.label}
+                </button>
+              );
+            })}
+          </nav>
+        </Card>
 
-          {/* Notifications */}
-          <Section title="Notifications" colors={colors}>
-            <ToggleRow
-              icon={Mail}
-              label="Email"
-              description="Recevoir des alertes par email"
-              checked={prefs.notifEmail}
-              onChange={() => savePref({ notifEmail: !prefs.notifEmail })}
-              colors={colors}
-            />
-            <ToggleRow
-              icon={Bell}
-              label="Push"
-              description="Notifications push dans le navigateur"
-              checked={prefs.notifPush}
-              onChange={() => savePref({ notifPush: !prefs.notifPush })}
-              colors={colors}
-            />
-            <ToggleRow
-              icon={Smartphone}
-              label="SMS"
-              description="Alertes par SMS"
-              checked={prefs.notifSms}
-              onChange={() => savePref({ notifSms: !prefs.notifSms })}
-              colors={colors}
-            />
-            <ToggleRow
-              icon={Bell}
-              label="Promotions"
-              description="Offres et nouveautés"
-              checked={prefs.notifPromotions}
-              onChange={() => savePref({ notifPromotions: !prefs.notifPromotions })}
-              colors={colors}
-            />
-          </Section>
-
-          {/* Sécurité & vie privée */}
-          <Section title="Sécurité & vie privée" colors={colors}>
-            <ToggleRow
-              icon={Eye}
-              label="Afficher le solde"
-              description="Masquer ou afficher par défaut"
-              checked={prefs.showBalance}
-              onChange={() => savePref({ showBalance: !prefs.showBalance })}
-              colors={colors}
-            />
-            <ToggleRow
-              icon={Lock}
-              label="Authentification à deux facteurs"
-              description="Renforcer la sécurité du compte"
-              checked={prefs.twoFactor}
-              onChange={() => savePref({ twoFactor: !prefs.twoFactor })}
-              colors={colors}
-            />
-          </Section>
-
-          {/* Compte */}
-          <Section title="Compte" colors={colors}>
-            <button
-              onClick={() => navigate('/security')}
-              className="w-full flex items-center gap-3 p-3.5 rounded-xl border text-left"
-              style={{ borderColor: colors.border, background: colors.card }}
-            >
-              <Lock size={20} style={{ color: colors.primary }} />
-              <div className="flex-1">
-                <div className="text-sm font-semibold" style={{ color: colors.text }}>
-                  Changer le mot de passe
-                </div>
-                <div className="text-xs mt-0.5" style={{ color: colors.textSecondary }}>
-                  Mettre à jour votre mot de passe
-                </div>
+        {/* ===== Panel ===== */}
+        <div className="lg:col-span-3 space-y-5">
+          {section === 'appearance' && (
+            <Card padding="md">
+              <SectionTitle title="Thème" subtitle="Choisissez l'apparence de l'interface" />
+              <div className="grid grid-cols-3 gap-3 mt-4">
+                <ThemeOption mode="light" active={mode === 'light'} onClick={() => setTheme('light')} />
+                <ThemeOption mode="dark" active={mode === 'dark'} onClick={() => setTheme('dark')} />
+                <ThemeOption mode="system" active={mode === 'system'} onClick={() => setTheme('system')} />
               </div>
-            </button>
+            </Card>
+          )}
 
-            <button
-              onClick={handleLogout}
-              className="w-full flex items-center gap-3 p-3.5 rounded-xl border text-left mt-2"
-              style={{
-                borderColor: '#ef4444',
-                background: 'rgba(239,68,68,0.1)',
-                color: '#ef4444',
-              }}
-            >
-              <LogOut size={20} />
-              <div className="text-sm font-semibold">Se déconnecter</div>
-            </button>
-          </Section>
+          {section === 'language' && (
+            <Card padding="md">
+              <SectionTitle title="Langue" subtitle="L'app et les notifications s'afficheront dans cette langue" />
+              <div className="grid grid-cols-2 gap-3 mt-4">
+                {[
+                  { id: 'fr' as const, label: 'Français', flag: '🇫🇷' },
+                  { id: 'en' as const, label: 'English', flag: '🇬🇧' },
+                ].map((l) => {
+                  const active = locale === l.id;
+                  return (
+                    <button
+                      key={l.id}
+                      onClick={() => setLang(l.id)}
+                      className={`p-4 rounded-xl border text-left flex items-center gap-3 transition-all ${
+                        active
+                          ? 'border-brand-500 bg-brand-500/10'
+                          : 'border-bg-border bg-bg-elevated hover:border-ink-dim'
+                      }`}
+                    >
+                      <div className="text-2xl">{l.flag}</div>
+                      <div>
+                        <div className="text-sm font-bold">{l.label}</div>
+                        <div className="text-[11px] text-ink-muted uppercase">{l.id}</div>
+                      </div>
+                    </button>
+                  );
+                })}
+              </div>
+            </Card>
+          )}
+
+          {section === 'notifications' && (
+            <Card padding="md">
+              <SectionTitle title="Canaux de notification" subtitle="Choisissez comment vous voulez être informé" />
+              <div className="mt-4 divide-y divide-bg-border">
+                <ToggleRow
+                  icon={Mail}
+                  title="Email"
+                  description="Recevez des alertes par email"
+                  checked={prefs.notifEmail}
+                  onChange={() => save({ notifEmail: !prefs.notifEmail })}
+                  colors={colors}
+                />
+                <ToggleRow
+                  icon={Bell}
+                  title="Push web"
+                  description="Notifications natives dans le navigateur"
+                  checked={prefs.notifPush}
+                  onChange={() => save({ notifPush: !prefs.notifPush })}
+                  colors={colors}
+                />
+                <ToggleRow
+                  icon={Smartphone}
+                  title="SMS"
+                  description="Alertes critiques par SMS (peut entraîner des frais)"
+                  checked={prefs.notifSms}
+                  onChange={() => save({ notifSms: !prefs.notifSms })}
+                  colors={colors}
+                />
+                <ToggleRow
+                  icon={Bell}
+                  title="Offres et promotions"
+                  description="Cashback, parrainage et nouveautés produit"
+                  checked={prefs.notifPromotions}
+                  onChange={() => save({ notifPromotions: !prefs.notifPromotions })}
+                  colors={colors}
+                />
+              </div>
+            </Card>
+          )}
+
+          {section === 'privacy' && (
+            <Card padding="md">
+              <SectionTitle title="Confidentialité & sécurité" subtitle="Contrôlez ce qui est visible et activez les protections" />
+              <div className="mt-4 divide-y divide-bg-border">
+                <ToggleRow
+                  icon={Eye}
+                  title="Afficher le solde par défaut"
+                  description="Masquer le solde au démarrage de l'app"
+                  checked={prefs.showBalance}
+                  onChange={() => save({ showBalance: !prefs.showBalance })}
+                  colors={colors}
+                />
+                <ToggleRow
+                  icon={Lock}
+                  title="Authentification à 2 facteurs"
+                  description="Une seconde vérification à chaque connexion"
+                  checked={prefs.twoFactor}
+                  onChange={() => save({ twoFactor: !prefs.twoFactor })}
+                  colors={colors}
+                />
+              </div>
+            </Card>
+          )}
+
+          {section === 'account' && (
+            <div className="space-y-4">
+              <Card padding="md">
+                <SectionTitle title="Compte" />
+                <div className="mt-3 space-y-2">
+                  <ActionRow
+                    icon={UserIcon}
+                    title="Mon profil"
+                    description="Nom, email, photo et préférences"
+                    onClick={() => navigate('/profile')}
+                  />
+                  <ActionRow
+                    icon={KeyRound}
+                    title="Changer le mot de passe"
+                    description="Mettre à jour votre mot de passe"
+                    onClick={() => navigate('/security')}
+                  />
+                </div>
+              </Card>
+
+              <Card padding="md" className="border-danger-500/30">
+                <SectionTitle title="Zone dangereuse" />
+                <button
+                  onClick={handleLogout}
+                  className="w-full flex items-center gap-3 p-3.5 rounded-xl border border-danger-500/30 bg-danger-bg text-danger-400 hover:bg-danger-500/20 transition-colors text-left mt-3"
+                >
+                  <LogOut size={18} />
+                  <div className="flex-1">
+                    <div className="text-sm font-bold">Se déconnecter</div>
+                    <div className="text-[11px] opacity-80">
+                      Fermer cette session sur ce navigateur
+                    </div>
+                  </div>
+                </button>
+              </Card>
+            </div>
+          )}
         </div>
       </div>
     </div>
   );
 }
 
-function Section({
-  title,
-  children,
-  colors,
-}: {
-  title: string;
-  children: React.ReactNode;
-  colors: any;
-}) {
+function SectionTitle({ title, subtitle }: { title: string; subtitle?: string }) {
   return (
     <div>
-      <h3
-        className="text-xs font-bold uppercase tracking-wider mb-3"
-        style={{ color: colors.textSecondary }}
-      >
-        {title}
-      </h3>
-      <div className="space-y-2">{children}</div>
+      <h2 className="text-base font-bold">{title}</h2>
+      {subtitle && <p className="text-xs text-ink-muted mt-1">{subtitle}</p>}
     </div>
   );
 }
 
-function ThemeButton({
+function ThemeOption({
+  mode,
   active,
-  icon: Icon,
-  label,
   onClick,
-  colors,
 }: {
+  mode: ThemeMode;
   active: boolean;
-  icon: LucideIcon;
-  label: string;
   onClick: () => void;
-  colors: any;
 }) {
+  const META = {
+    light: { icon: Sun, label: 'Clair' },
+    dark: { icon: Moon, label: 'Sombre' },
+    system: { icon: Monitor, label: 'Système' },
+  }[mode];
+  const Icon = META.icon;
   return (
     <button
       onClick={onClick}
-      className="flex-1 flex flex-col items-center gap-1.5 py-3 rounded-xl border"
-      style={{
-        borderColor: active ? colors.primary : colors.border,
-        background: active ? `${colors.primary}20` : colors.card,
-      }}
+      className={`relative p-4 rounded-xl border transition-all overflow-hidden ${
+        active
+          ? 'border-brand-500 bg-brand-500/10'
+          : 'border-bg-border bg-bg-elevated hover:border-ink-dim'
+      }`}
     >
-      <Icon size={20} style={{ color: active ? colors.primary : colors.textSecondary }} />
-      <span
-        className="text-xs font-medium"
-        style={{ color: active ? colors.primary : colors.textSecondary }}
-      >
-        {label}
-      </span>
+      <div className="flex flex-col items-center gap-2">
+        <div
+          className={`w-12 h-12 rounded-xl flex items-center justify-center ${
+            active ? 'bg-gradient-brand text-white' : 'bg-bg-surface text-ink-muted'
+          }`}
+        >
+          <Icon size={20} />
+        </div>
+        <div className="text-sm font-bold">{META.label}</div>
+      </div>
+      {active && (
+        <div className="absolute top-2 right-2 w-5 h-5 rounded-full bg-brand-500 flex items-center justify-center">
+          <span className="w-1.5 h-1.5 rounded-full bg-white" />
+        </div>
+      )}
     </button>
   );
 }
 
 function ToggleRow({
   icon: Icon,
-  label,
+  title,
   description,
   checked,
   onChange,
-  colors,
 }: {
   icon: LucideIcon;
-  label: string;
-  description?: string;
+  title: string;
+  description: string;
   checked: boolean;
   onChange: () => void;
-  colors: any;
+  colors?: any;
 }) {
   return (
-    <div
-      className="flex items-center gap-3 p-3.5 rounded-xl border"
-      style={{ borderColor: colors.border, background: colors.card }}
-    >
-      <Icon size={20} style={{ color: colors.primary }} />
-      <div className="flex-1 min-w-0">
-        <div className="text-sm font-semibold" style={{ color: colors.text }}>
-          {label}
-        </div>
-        {description && (
-          <div className="text-xs mt-0.5" style={{ color: colors.textSecondary }}>
-            {description}
-          </div>
-        )}
+    <div className="flex items-start gap-3 py-3.5">
+      <div
+        className={`w-10 h-10 rounded-xl flex items-center justify-center shrink-0 ${
+          checked
+            ? 'bg-gradient-brand-soft text-brand-300'
+            : 'bg-bg-elevated text-ink-muted'
+        }`}
+      >
+        <Icon size={16} />
+      </div>
+      <div className="flex-1 min-w-0 pt-0.5">
+        <div className="text-sm font-bold">{title}</div>
+        <div className="text-xs text-ink-muted mt-0.5">{description}</div>
       </div>
       <button
         type="button"
         onClick={onChange}
         role="switch"
         aria-checked={checked}
-        className="relative w-11 h-6 rounded-full transition-colors shrink-0"
-        style={{ background: checked ? colors.primary : colors.border }}
+        className={`relative w-11 h-6 rounded-full transition-colors shrink-0 mt-1 ${
+          checked ? 'bg-gradient-brand' : 'bg-bg-elevated border border-bg-border'
+        }`}
       >
         <span
           className="absolute top-0.5 w-5 h-5 rounded-full bg-white shadow transition-transform"
@@ -348,5 +396,32 @@ function ToggleRow({
         />
       </button>
     </div>
+  );
+}
+
+function ActionRow({
+  icon: Icon,
+  title,
+  description,
+  onClick,
+}: {
+  icon: LucideIcon;
+  title: string;
+  description: string;
+  onClick: () => void;
+}) {
+  return (
+    <button
+      onClick={onClick}
+      className="w-full flex items-center gap-3 p-3.5 rounded-xl border border-bg-border bg-bg-elevated/40 hover:bg-bg-elevated transition-colors text-left"
+    >
+      <div className="w-10 h-10 rounded-xl bg-gradient-brand-soft text-brand-300 flex items-center justify-center shrink-0">
+        <Icon size={16} />
+      </div>
+      <div className="flex-1 min-w-0">
+        <div className="text-sm font-bold">{title}</div>
+        <div className="text-xs text-ink-muted mt-0.5">{description}</div>
+      </div>
+    </button>
   );
 }

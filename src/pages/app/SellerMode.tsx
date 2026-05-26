@@ -1,25 +1,27 @@
 import {
-  Banknote,
+  ArrowDownLeft,
   Calendar,
   Copy,
   Download,
   Edit3,
-  Loader2,
-  QrCode,
+  Receipt,
   Share2,
+  Sparkles,
   Store,
   TrendingUp,
+  Wallet,
   X,
+  type LucideIcon,
 } from 'lucide-react';
 import { QRCodeCanvas } from 'qrcode.react';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import GradientHeader from '../../components/GradientHeader';
 import { useAuth } from '../../contexts/AuthContext';
 import { useLocale } from '../../contexts/LocaleContext';
-import { useColors } from '../../contexts/ThemeContext';
+import { useSocket } from '../../contexts/SocketContext';
 import { transactionService } from '../../services/api';
+import { Avatar, Badge, Button, Card, Empty, PageHeader, Skeleton } from '../../ui';
 
-interface ReceivedTx {
+interface Received {
   id: string;
   montant: number;
   createdAt: string;
@@ -29,13 +31,13 @@ interface ReceivedTx {
 }
 
 export default function SellerMode() {
-  const colors = useColors();
   const { user } = useAuth();
   const { formatCurrency } = useLocale();
+  const { onMessage } = useSocket();
 
-  const [requestedAmount, setRequestedAmount] = useState('');
+  const [amount, setAmount] = useState('');
   const [editingAmount, setEditingAmount] = useState(false);
-  const [receivedTx, setReceivedTx] = useState<ReceivedTx[]>([]);
+  const [received, setReceived] = useState<Received[]>([]);
   const [loading, setLoading] = useState(true);
   const qrRef = useRef<HTMLDivElement | null>(null);
 
@@ -49,21 +51,21 @@ export default function SellerMode() {
           : "Utilisateur M'Paye",
         email: user?.email,
         telephone: user?.telephone || '',
-        amount: requestedAmount ? Number(requestedAmount) : undefined,
+        amount: amount ? Number(amount) : undefined,
         timestamp: new Date().toISOString(),
       }),
-    [user, requestedAmount],
+    [user, amount],
   );
 
   const load = useCallback(async () => {
     try {
-      const res = await transactionService.getTransactions({ limit: 50 });
-      const list = (res?.transactions || res || []) as ReceivedTx[];
-      const credits = list.filter((tx) => tx.isCredit || tx.type === 'DEPOSIT');
-      setReceivedTx(credits);
-    } catch (e: any) {
-      console.error('Erreur chargement stats:', e?.response?.data || e?.message);
-      setReceivedTx([]);
+      setLoading(true);
+      const r = await transactionService.getTransactions({ limit: 50 });
+      const list = (r?.transactions || r || []) as Received[];
+      const credits = list.filter((t) => t.isCredit || t.type === 'DEPOSIT');
+      setReceived(credits);
+    } catch {
+      setReceived([]);
     } finally {
       setLoading(false);
     }
@@ -72,6 +74,13 @@ export default function SellerMode() {
   useEffect(() => {
     void load();
   }, [load]);
+
+  // Refresh on real-time payment notification
+  useEffect(() => {
+    return onMessage(() => {
+      void load();
+    });
+  }, [onMessage, load]);
 
   const stats = useMemo(() => {
     const now = new Date();
@@ -83,48 +92,47 @@ export default function SellerMode() {
       week = 0,
       month = 0,
       total = 0;
-    let countToday = 0,
-      countWeek = 0,
-      countMonth = 0;
-    for (const tx of receivedTx) {
-      const d = new Date(tx.createdAt);
-      const amt = Number(tx.montant || 0);
-      total += amt;
+    let ct = 0,
+      cw = 0,
+      cm = 0;
+    for (const t of received) {
+      const d = new Date(t.createdAt);
+      const a = Number(t.montant) || 0;
+      total += a;
       if (d >= startMonth) {
-        month += amt;
-        countMonth++;
+        month += a;
+        cm++;
       }
       if (d >= startWeek) {
-        week += amt;
-        countWeek++;
+        week += a;
+        cw++;
       }
       if (d >= startToday) {
-        today += amt;
-        countToday++;
+        today += a;
+        ct++;
       }
     }
-    return { today, week, month, total, countToday, countWeek, countMonth };
-  }, [receivedTx]);
+    return { today, week, month, total, ct, cw, cm };
+  }, [received]);
 
-  const getQRCanvas = (): HTMLCanvasElement | null => {
-    return qrRef.current?.querySelector('canvas') || null;
-  };
+  const getCanvas = (): HTMLCanvasElement | null =>
+    qrRef.current?.querySelector('canvas') || null;
 
-  const downloadQR = () => {
-    const canvas = getQRCanvas();
+  const download = () => {
+    const canvas = getCanvas();
     if (!canvas) return;
     const link = document.createElement('a');
     link.href = canvas.toDataURL('image/png');
-    link.download = `mpaye-qr-${user?.prenom || 'user'}.png`;
+    link.download = `mpaye-receive-${user?.prenom || 'qr'}.png`;
     link.click();
   };
 
-  const shareQR = async () => {
-    const canvas = getQRCanvas();
+  const share = async () => {
+    const canvas = getCanvas();
     if (!canvas) return;
     try {
-      const blob: Blob | null = await new Promise((resolve) =>
-        canvas.toBlob((b) => resolve(b), 'image/png'),
+      const blob: Blob | null = await new Promise((res) =>
+        canvas.toBlob((b) => res(b), 'image/png'),
       );
       if (!blob) return;
       const file = new File([blob], 'qr-mpaye.png', { type: 'image/png' });
@@ -132,249 +140,228 @@ export default function SellerMode() {
         await navigator.share({
           files: [file],
           title: "Paiement M'Paye",
-          text: `Scannez ce QR pour payer ${
-            requestedAmount ? formatCurrency(Number(requestedAmount)) : ''
-          } à ${user?.prenom || user?.email}`,
+          text: amount
+            ? `Payez-moi ${formatCurrency(Number(amount))} sur M'Paye`
+            : 'Payez-moi sur M\'Paye',
         });
       } else {
-        downloadQR();
+        download();
       }
-    } catch (e) {
-      console.error('Partage annulé ou indisponible', e);
+    } catch {
+      /* */
     }
   };
 
-  const copyContactLink = async () => {
-    const text = `Payez-moi sur M'Paye : ${user?.email || user?.telephone}${
-      requestedAmount ? ` — ${formatCurrency(Number(requestedAmount))}` : ''
-    }`;
+  const copyLink = async () => {
     try {
-      await navigator.clipboard.writeText(text);
+      await navigator.clipboard.writeText(
+        `Payez-moi sur M'Paye : ${user?.email || user?.telephone}${
+          amount ? ` — ${formatCurrency(Number(amount))}` : ''
+        }`,
+      );
       alert('Lien copié');
     } catch {
-      alert('Copie indisponible');
+      /* */
     }
   };
 
+  const displayName = user?.prenom
+    ? `${user.prenom} ${user.nom || ''}`.trim()
+    : 'Mon compte';
+
   return (
-    <div className="min-h-screen bg-bg pb-8">
-      <div className="max-w-3xl mx-auto">
-        <GradientHeader
-          title="Mode vendeur"
-          subtitle="Recevez des paiements via QR"
+    <div className="space-y-6 animate-fade-in">
+      <PageHeader
+        title="Mode vendeur"
+        subtitle="Recevez des paiements via votre QR personnel — sans frais, instantané"
+        actions={
+          <Badge tone="brand" icon={<Sparkles size={11} />}>
+            <Store size={11} className="mr-1" />
+            Vendeur
+          </Badge>
+        }
+      />
+
+      {/* Stats strip */}
+      <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
+        <StatCard
+          label="Aujourd'hui"
+          amount={stats.today}
+          count={stats.ct}
+          icon={Calendar}
+          tone="success"
+          formatCurrency={formatCurrency}
         />
+        <StatCard
+          label="7 derniers jours"
+          amount={stats.week}
+          count={stats.cw}
+          icon={Calendar}
+          tone="brand"
+          formatCurrency={formatCurrency}
+        />
+        <StatCard
+          label="Ce mois-ci"
+          amount={stats.month}
+          count={stats.cm}
+          icon={Calendar}
+          tone="warning"
+          formatCurrency={formatCurrency}
+        />
+        <StatCard
+          label="Total reçu"
+          amount={stats.total}
+          count={received.length}
+          icon={TrendingUp}
+          tone="cyan"
+          formatCurrency={formatCurrency}
+        />
+      </div>
 
-        <div className="px-5 mt-4 space-y-5">
-          {/* QR Card */}
-          <div
-            className="rounded-2xl p-6 text-center"
-            style={{
-              background: 'linear-gradient(135deg, #0f172a 0%, #1e40af 100%)',
-              color: '#fff',
-            }}
-          >
-            <div className="flex items-center justify-center gap-2 mb-1">
-              <Store size={18} />
-              <div className="text-sm font-semibold opacity-90">
-                {user?.prenom
-                  ? `${user.prenom} ${user.nom || ''}`.trim()
-                  : "Utilisateur M'Paye"}
-              </div>
-            </div>
-            <div className="text-xs opacity-80 mb-5">{user?.email}</div>
-
-            {/* Montant */}
-            <div className="mb-5">
-              {editingAmount ? (
-                <div className="flex items-center justify-center gap-2 max-w-xs mx-auto">
-                  <input
-                    type="text"
-                    inputMode="numeric"
-                    autoFocus
-                    className="flex-1 bg-white/15 px-3 py-2 rounded-xl text-center text-white text-lg font-bold outline-none placeholder:text-white/60"
-                    placeholder="Montant (Ar)"
-                    value={requestedAmount}
-                    onChange={(e) =>
-                      setRequestedAmount(e.target.value.replace(/[^\d]/g, ''))
-                    }
-                    onBlur={() => setEditingAmount(false)}
-                    onKeyDown={(e) => {
-                      if (e.key === 'Enter' || e.key === 'Escape') {
-                        setEditingAmount(false);
-                      }
-                    }}
-                  />
-                  {requestedAmount && (
-                    <button
-                      onClick={() => {
-                        setRequestedAmount('');
-                        setEditingAmount(false);
-                      }}
-                      className="w-9 h-9 rounded-lg bg-white/15 flex items-center justify-center"
-                    >
-                      <X size={16} />
-                    </button>
-                  )}
-                </div>
-              ) : (
-                <button
-                  onClick={() => setEditingAmount(true)}
-                  className="inline-flex items-center gap-2 px-4 py-2 rounded-xl bg-white/15 hover:bg-white/25 transition-colors"
-                >
-                  {requestedAmount ? (
-                    <>
-                      <span className="text-2xl font-extrabold">
-                        {Number(requestedAmount).toLocaleString('fr-FR')} Ar
-                      </span>
-                      <Edit3 size={14} className="opacity-70" />
-                    </>
-                  ) : (
-                    <>
-                      <Edit3 size={14} />
-                      <span className="text-sm font-semibold">
-                        Ajouter un montant
-                      </span>
-                    </>
-                  )}
-                </button>
-              )}
-            </div>
-
-            {/* QR */}
-            <div
-              ref={qrRef}
-              className="bg-white p-4 rounded-2xl inline-block mx-auto"
-            >
-              <QRCodeCanvas
-                value={qrData}
-                size={220}
-                level="H"
-                includeMargin={false}
-              />
-            </div>
-
-            <div className="text-xs opacity-80 mt-4">
-              Demandez à votre client de scanner ce QR avec son app M'Paye
-            </div>
-
-            {/* Actions */}
-            <div className="flex gap-2 mt-5 max-w-sm mx-auto">
-              <button
-                onClick={shareQR}
-                className="flex-1 flex items-center justify-center gap-1.5 py-2 rounded-xl bg-white/20 hover:bg-white/30 text-sm font-semibold"
-              >
-                <Share2 size={16} />
-                Partager
-              </button>
-              <button
-                onClick={downloadQR}
-                className="flex-1 flex items-center justify-center gap-1.5 py-2 rounded-xl bg-white/20 hover:bg-white/30 text-sm font-semibold"
-              >
-                <Download size={16} />
-                Télécharger
-              </button>
-              <button
-                onClick={copyContactLink}
-                className="flex items-center justify-center px-3 py-2 rounded-xl bg-white/20 hover:bg-white/30"
-                title="Copier le lien"
-              >
-                <Copy size={16} />
-              </button>
+      <div className="grid grid-cols-1 lg:grid-cols-3 gap-5">
+        {/* === QR Card (2/3) === */}
+        <Card padding="lg" className="lg:col-span-2 text-center">
+          <div className="flex items-center justify-center gap-2 mb-1">
+            <Avatar name={displayName} size="md" />
+            <div className="text-left">
+              <div className="text-base font-bold">{displayName}</div>
+              <div className="text-xs text-ink-muted">{user?.email}</div>
             </div>
           </div>
 
-          {/* Stats */}
-          <section>
-            <div className="flex items-center gap-2 mb-3">
-              <TrendingUp size={18} style={{ color: colors.primary }} />
-              <h3 className="text-sm font-bold" style={{ color: colors.text }}>
-                Vos stats
-              </h3>
-            </div>
-            <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
-              <StatCard
-                label="Aujourd'hui"
-                amount={stats.today}
-                count={stats.countToday}
-                icon={Calendar}
-                color={colors.success}
-                formatCurrency={formatCurrency}
-                colors={colors}
-              />
-              <StatCard
-                label="7 derniers jours"
-                amount={stats.week}
-                count={stats.countWeek}
-                icon={Calendar}
-                color={colors.primary}
-                formatCurrency={formatCurrency}
-                colors={colors}
-              />
-              <StatCard
-                label="Ce mois-ci"
-                amount={stats.month}
-                count={stats.countMonth}
-                icon={Calendar}
-                color={colors.warning}
-                formatCurrency={formatCurrency}
-                colors={colors}
-              />
-            </div>
-          </section>
-
-          {/* Derniers paiements */}
-          <section>
-            <h3 className="text-sm font-bold mb-3" style={{ color: colors.text }}>
-              Derniers paiements reçus
-            </h3>
-            {loading ? (
-              <div className="flex justify-center py-8">
-                <Loader2 className="animate-spin" size={24} style={{ color: colors.primary }} />
-              </div>
-            ) : receivedTx.length === 0 ? (
-              <div className="card flex flex-col items-center gap-2 py-8">
-                <Banknote size={40} style={{ color: colors.textSecondary }} />
-                <div className="text-sm" style={{ color: colors.textSecondary }}>
-                  Aucun paiement reçu
-                </div>
+          {/* Amount editor */}
+          <div className="mt-5 mb-6">
+            {editingAmount ? (
+              <div className="flex items-center justify-center gap-2 max-w-xs mx-auto">
+                <input
+                  type="text"
+                  inputMode="numeric"
+                  autoFocus
+                  placeholder="Montant (Ar)"
+                  value={amount}
+                  onChange={(e) => setAmount(e.target.value.replace(/[^\d]/g, ''))}
+                  onBlur={() => setEditingAmount(false)}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter' || e.key === 'Escape') setEditingAmount(false);
+                  }}
+                  className="input text-center text-2xl font-bold py-3"
+                />
+                {amount && (
+                  <button
+                    onClick={() => {
+                      setAmount('');
+                      setEditingAmount(false);
+                    }}
+                    className="p-2.5 rounded-xl bg-bg-elevated text-ink-muted hover:text-ink"
+                  >
+                    <X size={16} />
+                  </button>
+                )}
               </div>
             ) : (
-              <div className="space-y-2">
-                {receivedTx.slice(0, 10).map((tx) => (
+              <button
+                onClick={() => setEditingAmount(true)}
+                className="inline-flex items-center gap-2 px-5 py-3 rounded-2xl bg-gradient-brand-soft border border-brand-500/30 hover:border-brand-500 transition-colors"
+              >
+                {amount ? (
+                  <>
+                    <span className="text-3xl font-bold text-ink">
+                      {Number(amount).toLocaleString('fr-FR')} Ar
+                    </span>
+                    <Edit3 size={14} className="text-brand-300" />
+                  </>
+                ) : (
+                  <>
+                    <Edit3 size={14} className="text-brand-300" />
+                    <span className="text-sm font-semibold text-ink-muted">
+                      Définir un montant (optionnel)
+                    </span>
+                  </>
+                )}
+              </button>
+            )}
+          </div>
+
+          {/* QR */}
+          <div className="inline-block bg-white p-5 rounded-3xl shadow-elevated">
+            <div ref={qrRef}>
+              <QRCodeCanvas value={qrData} size={260} level="H" />
+            </div>
+          </div>
+
+          <p className="text-xs text-ink-muted mt-5 max-w-sm mx-auto">
+            Demandez à votre client de scanner ce QR avec son app M'Paye.
+            {amount && ' Le montant sera pré-rempli automatiquement.'}
+          </p>
+
+          <div className="flex flex-wrap gap-2 justify-center mt-5">
+            <Button variant="primary" size="md" icon={Share2} onClick={share}>
+              Partager
+            </Button>
+            <Button variant="secondary" size="md" icon={Download} onClick={download}>
+              Télécharger
+            </Button>
+            <Button variant="ghost" size="md" icon={Copy} onClick={copyLink}>
+              Copier le lien
+            </Button>
+          </div>
+        </Card>
+
+        {/* === Recent payments (1/3) === */}
+        <Card padding="md">
+          <div className="flex items-center gap-2 mb-3">
+            <Receipt size={16} className="text-brand-300" />
+            <h3 className="text-sm font-bold">Paiements reçus</h3>
+          </div>
+          <p className="text-xs text-ink-muted mb-4">
+            Mis à jour en temps réel
+          </p>
+
+          {loading ? (
+            <div className="space-y-2">
+              {[...Array(4)].map((_, i) => (
+                <Skeleton key={i} className="h-14 rounded-xl" />
+              ))}
+            </div>
+          ) : received.length === 0 ? (
+            <Empty
+              icon={Wallet}
+              title="Aucun paiement"
+              description="Les paiements reçus apparaîtront ici"
+              className="py-8"
+            />
+          ) : (
+            <div className="space-y-2 max-h-[480px] overflow-y-auto pr-1 -mr-1">
+              {received.slice(0, 12).map((t) => {
+                const name = t.sender?.fullName || 'Paiement reçu';
+                return (
                   <div
-                    key={tx.id}
-                    className="card flex items-center justify-between p-3"
+                    key={t.id}
+                    className="flex items-center gap-2.5 p-2.5 rounded-xl border border-bg-border bg-bg-elevated/40"
                   >
-                    <div className="flex items-center gap-3 min-w-0">
-                      <div
-                        className="w-10 h-10 rounded-full flex items-center justify-center shrink-0"
-                        style={{ background: `${colors.success}20` }}
-                      >
-                        <Banknote size={20} style={{ color: colors.success }} />
-                      </div>
-                      <div className="min-w-0">
-                        <div className="text-sm font-medium truncate" style={{ color: colors.text }}>
-                          {tx.sender?.fullName || 'Paiement reçu'}
-                        </div>
-                        <div className="text-xs" style={{ color: colors.textSecondary }}>
-                          {new Date(tx.createdAt).toLocaleString('fr-FR', {
-                            day: '2-digit',
-                            month: 'short',
-                            hour: '2-digit',
-                            minute: '2-digit',
-                          })}
-                        </div>
+                    <div className="w-9 h-9 rounded-xl bg-success-bg text-success-400 flex items-center justify-center shrink-0">
+                      <ArrowDownLeft size={14} />
+                    </div>
+                    <div className="flex-1 min-w-0">
+                      <div className="text-xs font-semibold truncate">{name}</div>
+                      <div className="text-[10px] text-ink-dim">
+                        {new Date(t.createdAt).toLocaleString('fr-FR', {
+                          day: '2-digit',
+                          month: 'short',
+                          hour: '2-digit',
+                          minute: '2-digit',
+                        })}
                       </div>
                     </div>
-                    <div className="text-sm font-bold" style={{ color: colors.success }}>
-                      +{Number(tx.montant).toLocaleString('fr-FR')} Ar
+                    <div className="text-sm font-bold text-success-400 shrink-0">
+                      +{Number(t.montant).toLocaleString('fr-FR')}
                     </div>
                   </div>
-                ))}
-              </div>
-            )}
-          </section>
-        </div>
+                );
+              })}
+            </div>
+          )}
+        </Card>
       </div>
     </div>
   );
@@ -385,32 +372,38 @@ function StatCard({
   amount,
   count,
   icon: Icon,
-  color,
+  tone,
   formatCurrency,
-  colors,
 }: {
   label: string;
   amount: number;
   count: number;
-  icon: any;
-  color: string;
+  icon: LucideIcon;
+  tone: 'success' | 'brand' | 'warning' | 'cyan';
   formatCurrency: (n: number) => string;
-  colors: any;
 }) {
+  const TONES = {
+    success: 'text-success-400 bg-success-bg',
+    brand: 'text-brand-300 bg-brand-500/15',
+    warning: 'text-warning-400 bg-warning-bg',
+    cyan: 'text-cyan-400 bg-cyan-500/15',
+  };
   return (
-    <div className="card p-4">
-      <div className="flex items-center gap-2 mb-2">
-        <Icon size={16} style={{ color }} />
-        <div className="text-xs font-semibold" style={{ color: colors.textSecondary }}>
-          {label}
+    <Card padding="md">
+      <div className="flex items-start justify-between mb-2">
+        <span className="text-xs text-ink-muted font-medium">{label}</span>
+        <div
+          className={`w-9 h-9 rounded-xl flex items-center justify-center ${TONES[tone]}`}
+        >
+          <Icon size={16} />
         </div>
       </div>
-      <div className="text-lg font-extrabold" style={{ color: colors.text }}>
+      <div className="text-xl font-bold tracking-tight truncate">
         {formatCurrency(amount)}
       </div>
-      <div className="text-xs mt-0.5" style={{ color: colors.textSecondary }}>
+      <div className="text-[11px] text-ink-dim mt-0.5">
         {count} paiement{count > 1 ? 's' : ''}
       </div>
-    </div>
+    </Card>
   );
 }

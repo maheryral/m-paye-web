@@ -1,21 +1,32 @@
 import {
+  ArrowRight,
+  Check,
   CheckCircle2,
   ChevronRight,
-  DollarSign,
+  CreditCard,
   FileText,
   Loader2,
+  Mail,
+  Phone,
   Search,
   Send,
+  Sparkles,
+  Star,
   User as UserIcon,
+  Users,
+  Wallet,
+  X,
 } from 'lucide-react';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import GradientHeader from '../../components/GradientHeader';
 import { useLocale } from '../../contexts/LocaleContext';
-import { useColors } from '../../contexts/ThemeContext';
 import { useWallet } from '../../contexts/WalletContext';
-import { transactionService } from '../../services/api';
-import { monetizationApi, type FeeCalculation } from '../../services/monetizationApi';
+import { beneficiaryService, transactionService } from '../../services/api';
+import {
+  monetizationApi,
+  type FeeCalculation,
+} from '../../services/monetizationApi';
+import { Avatar, Badge, Button, Card, Empty, Input, PageHeader } from '../../ui';
 
 interface UserSuggestion {
   id: string;
@@ -25,38 +36,54 @@ interface UserSuggestion {
   telephone?: string;
 }
 
-const MIN_AMOUNT = 1000;
-const MAX_AMOUNT = 5_000_000;
+interface SavedBeneficiary {
+  id: string;
+  name: string;
+  phone: string;
+  email?: string;
+  isFavorite: boolean;
+  lastAmount?: number;
+}
+
+const MIN = 1000;
+const MAX = 5_000_000;
 
 export default function Transfers() {
   const navigate = useNavigate();
-  const colors = useColors();
   const { formatCurrency } = useLocale();
   const { balance, fetchBalance } = useWallet();
 
-  const [step, setStep] = useState<1 | 2 | 3>(1);
-  const [loading, setLoading] = useState(false);
+  const [recipient, setRecipient] = useState<UserSuggestion | null>(null);
+  const [query, setQuery] = useState('');
   const [searching, setSearching] = useState(false);
-  const [validatedRecipient, setValidatedRecipient] = useState<UserSuggestion | null>(null);
   const [suggestions, setSuggestions] = useState<UserSuggestion[]>([]);
-  const [showSuggestions, setShowSuggestions] = useState(false);
+  const [showSugg, setShowSugg] = useState(false);
+  const queryTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
-  const [toPhone, setToPhone] = useState('');
   const [amount, setAmount] = useState('');
   const [motif, setMotif] = useState('');
+  const [loading, setLoading] = useState(false);
+  const [confirmOpen, setConfirmOpen] = useState(false);
+  const [success, setSuccess] = useState<{ amt: number; to: string } | null>(null);
 
   const [feeCalc, setFeeCalc] = useState<FeeCalculation | null>(null);
-  const suggestionTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
+  const [beneficiaries, setBeneficiaries] = useState<SavedBeneficiary[]>([]);
+
+  // Load beneficiaries on mount
+  useEffect(() => {
+    (async () => {
+      try {
+        const data = await beneficiaryService.list();
+        setBeneficiaries(Array.isArray(data) ? data : []);
+      } catch {
+        setBeneficiaries([]);
+      }
+    })();
+  }, []);
+
+  // Live fee calculation
   const amountNum = useMemo(() => parseFloat(amount) || 0, [amount]);
-  const fee = feeCalc?.feeAmount ?? 0;
-  const feePercentLabel = feeCalc ? `${(feeCalc.feePercent * 100).toFixed(2)}%` : '0%';
-  const totalDebit = amountNum + fee;
-  const hasEnoughBalance = totalDebit <= balance;
-  const isAmountValid = amountNum >= MIN_AMOUNT && amountNum <= MAX_AMOUNT;
-  const isFormValid = !!validatedRecipient && !!amount && isAmountValid && hasEnoughBalance;
-
-  // Fee calc debounced
   useEffect(() => {
     if (!amountNum) {
       setFeeCalc(null);
@@ -64,8 +91,8 @@ export default function Transfers() {
     }
     const t = setTimeout(async () => {
       try {
-        const res = await monetizationApi.calculateFee('TRANSFER', amountNum);
-        setFeeCalc(res.data);
+        const r = await monetizationApi.calculateFee('TRANSFER', amountNum);
+        setFeeCalc(r.data);
       } catch {
         setFeeCalc(null);
       }
@@ -73,17 +100,32 @@ export default function Transfers() {
     return () => clearTimeout(t);
   }, [amountNum]);
 
-  const fetchSuggestions = async (q: string) => {
+  const fee = feeCalc?.feeAmount ?? 0;
+  const feePct = feeCalc ? `${(feeCalc.feePercent * 100).toFixed(2)}%` : '0%';
+  const total = amountNum + fee;
+  const hasBalance = total <= balance;
+  const isAmountOk = amountNum >= MIN && amountNum <= MAX;
+  const canSend = !!recipient && !!amount && isAmountOk && hasBalance;
+
+  // Autocomplete search
+  const onQueryChange = (val: string) => {
+    setQuery(val);
+    setRecipient(null);
+    if (queryTimer.current) clearTimeout(queryTimer.current);
+    queryTimer.current = setTimeout(() => void doSearch(val), 250);
+  };
+
+  const doSearch = async (q: string) => {
     if (!q || q.length < 3) {
       setSuggestions([]);
-      setShowSuggestions(false);
+      setShowSugg(false);
       return;
     }
     setSearching(true);
     try {
       const list = await transactionService.suggestUsers(q);
       setSuggestions(Array.isArray(list) ? list : []);
-      setShowSuggestions(true);
+      setShowSugg(true);
     } catch {
       setSuggestions([]);
     } finally {
@@ -91,361 +133,496 @@ export default function Transfers() {
     }
   };
 
-  const handleToPhoneChange = (val: string) => {
-    setToPhone(val);
-    setValidatedRecipient(null);
-    if (suggestionTimer.current) clearTimeout(suggestionTimer.current);
-    suggestionTimer.current = setTimeout(() => fetchSuggestions(val), 250);
-  };
-
-  const pickRecipient = (r: UserSuggestion) => {
-    setValidatedRecipient(r);
-    setToPhone(r.email || r.telephone || '');
+  const pickRecipient = (u: UserSuggestion) => {
+    setRecipient(u);
+    setQuery(u.email || u.telephone || '');
     setSuggestions([]);
-    setShowSuggestions(false);
+    setShowSugg(false);
   };
 
-  const resetForm = () => {
-    setToPhone('');
-    setAmount('');
-    setMotif('');
-    setValidatedRecipient(null);
-    setStep(1);
-    setFeeCalc(null);
+  const pickFromBeneficiary = (b: SavedBeneficiary) => {
+    const [prenom, ...rest] = b.name.split(' ');
+    pickRecipient({
+      id: b.id,
+      prenom,
+      nom: rest.join(' '),
+      email: b.email,
+      telephone: b.phone,
+    });
   };
 
-  const handleSubmit = async () => {
-    if (!isFormValid) return;
+  const doSend = async () => {
+    if (!recipient || !canSend) return;
     setLoading(true);
-    setStep(2);
     try {
+      const to = recipient.email || recipient.telephone || '';
       await transactionService.transfer({
-        toPhone,
+        toPhone: to,
         amount: amountNum,
-        motif: motif || 'Transfert MyWallet',
+        motif: motif || 'Transfert M\'Paye',
       });
       await fetchBalance();
-      setStep(3);
-    } catch (error: any) {
-      alert(error?.response?.data?.message || error?.message || 'Erreur lors du transfert');
-      setStep(1);
+      setConfirmOpen(false);
+      setSuccess({
+        amt: amountNum,
+        to: `${recipient.prenom || ''} ${recipient.nom || ''}`.trim() || to,
+      });
+    } catch (e: any) {
+      alert(e?.response?.data?.message || 'Échec du transfert');
     } finally {
       setLoading(false);
     }
   };
 
+  const reset = () => {
+    setRecipient(null);
+    setQuery('');
+    setAmount('');
+    setMotif('');
+    setSuccess(null);
+    setFeeCalc(null);
+  };
+
+  const favorites = beneficiaries.filter((b) => b.isFavorite).slice(0, 6);
+  const recents = beneficiaries.filter((b) => !b.isFavorite).slice(0, 8);
+
   return (
-    <div className="min-h-screen bg-bg pb-8">
-      <div className="max-w-2xl mx-auto">
-        <GradientHeader title="Transfert" subtitle={`Solde : ${formatCurrency(balance)}`} />
+    <div className="space-y-6 animate-fade-in">
+      <PageHeader
+        title="Envoyer de l'argent"
+        subtitle="Transfert instantané et gratuit entre comptes M'Paye"
+        actions={
+          <Button
+            variant="secondary"
+            size="sm"
+            icon={Users}
+            onClick={() => navigate('/beneficiaries')}
+          >
+            Gérer bénéficiaires
+          </Button>
+        }
+      />
 
-        {step === 1 && (
-          <div className="px-5 mt-4 space-y-4">
-            {/* Destinataire */}
-            <div>
-              <label className="text-xs font-semibold mb-2 block" style={{ color: colors.textSecondary }}>
-                Email ou numéro de téléphone
-              </label>
-              <div
-                className="flex items-center gap-2 px-3 py-2.5 rounded-xl border"
-                style={{ borderColor: colors.border, background: colors.card }}
-              >
-                <UserIcon size={20} style={{ color: colors.textSecondary }} />
-                <input
-                  className="flex-1 bg-transparent outline-none text-sm"
-                  style={{ color: colors.text }}
-                  placeholder="exemple@email.com ou 032 12 345 67"
-                  value={toPhone}
-                  onChange={(e) => handleToPhoneChange(e.target.value)}
-                  autoCapitalize="none"
-                />
-                {searching && (
-                  <Loader2 size={16} className="animate-spin" style={{ color: colors.primary }} />
-                )}
-              </div>
+      <div className="grid grid-cols-1 lg:grid-cols-3 gap-5">
+        {/* === Left: form (2/3) === */}
+        <div className="lg:col-span-2 space-y-5">
+          {/* Recipient */}
+          <Card padding="md">
+            <h3 className="text-sm font-bold mb-1">Destinataire</h3>
+            <p className="text-xs text-ink-muted mb-4">
+              Recherchez par nom, email ou numéro de téléphone
+            </p>
 
-              {showSuggestions && suggestions.length > 0 && !validatedRecipient && (
-                <div
-                  className="mt-2 rounded-xl border overflow-hidden"
-                  style={{ background: colors.card, borderColor: colors.border }}
-                >
+            <div className="relative">
+              <Input
+                icon={Search}
+                placeholder="Tapez au moins 3 caractères..."
+                value={query}
+                onChange={(e) => onQueryChange(e.target.value)}
+                autoComplete="off"
+                iconEnd={searching ? Loader2 : undefined}
+              />
+              {showSugg && suggestions.length > 0 && !recipient && (
+                <div className="absolute z-20 left-0 right-0 top-full mt-2 card shadow-elevated max-h-72 overflow-y-auto p-1">
                   {suggestions.map((u) => (
                     <button
                       key={u.id}
                       onClick={() => pickRecipient(u)}
-                      className="w-full flex items-center gap-3 p-3 text-left border-b last:border-b-0 hover:bg-white/5"
-                      style={{ borderColor: colors.border }}
+                      className="w-full flex items-center gap-3 p-2.5 rounded-lg hover:bg-bg-elevated text-left"
                     >
-                      <div
-                        className="w-10 h-10 rounded-full flex items-center justify-center text-white font-bold shrink-0"
-                        style={{ background: colors.primary }}
-                      >
-                        {(u.prenom?.[0] || u.email?.[0] || '?').toUpperCase()}
-                      </div>
+                      <Avatar name={`${u.prenom || ''} ${u.nom || ''}`.trim() || u.email} size="sm" />
                       <div className="flex-1 min-w-0">
-                        <div className="text-sm font-medium truncate" style={{ color: colors.text }}>
+                        <div className="text-sm font-semibold truncate">
                           {`${u.prenom || ''} ${u.nom || ''}`.trim() || 'Utilisateur'}
                         </div>
-                        <div className="text-xs truncate" style={{ color: colors.textSecondary }}>
+                        <div className="text-xs text-ink-muted truncate">
                           {u.email} {u.telephone ? `· ${u.telephone}` : ''}
                         </div>
                       </div>
-                      <ChevronRight size={16} style={{ color: colors.textSecondary }} />
+                      <ChevronRight size={14} className="text-ink-dim" />
                     </button>
                   ))}
                 </div>
               )}
+              {showSugg && !searching && suggestions.length === 0 && query.length >= 3 && !recipient && (
+                <div className="absolute z-20 left-0 right-0 top-full mt-2 card p-3 text-center text-xs text-ink-muted">
+                  Aucun utilisateur trouvé
+                </div>
+              )}
+            </div>
 
-              {showSuggestions &&
-                suggestions.length === 0 &&
-                !searching &&
-                toPhone.length >= 3 &&
-                !validatedRecipient && (
-                  <div
-                    className="mt-2 flex items-center gap-2 p-3 rounded-xl border"
-                    style={{ background: colors.card, borderColor: colors.border }}
-                  >
-                    <Search size={16} style={{ color: colors.textSecondary }} />
-                    <span className="text-xs" style={{ color: colors.textSecondary }}>
-                      Aucun utilisateur trouvé
+            {/* Recipient validated chip */}
+            {recipient && (
+              <div className="mt-4 flex items-center gap-3 p-3 rounded-xl bg-success-bg border border-success-500/30">
+                <Avatar
+                  name={`${recipient.prenom || ''} ${recipient.nom || ''}`.trim() || recipient.email}
+                  size="md"
+                />
+                <div className="flex-1 min-w-0">
+                  <div className="flex items-center gap-2">
+                    <CheckCircle2 size={14} className="text-success-400" />
+                    <span className="text-sm font-bold">
+                      {`${recipient.prenom || ''} ${recipient.nom || ''}`.trim() || 'Bénéficiaire'}
                     </span>
                   </div>
-                )}
-            </div>
-
-            {/* Bénéficiaire validé */}
-            {validatedRecipient && (
-              <div
-                className="p-3.5 rounded-xl border"
-                style={{
-                  background: `${colors.success}15`,
-                  borderColor: colors.success,
-                }}
-              >
-                <div className="flex items-center gap-2 mb-2">
-                  <CheckCircle2 size={20} style={{ color: colors.success }} />
-                  <span className="text-sm font-bold" style={{ color: colors.success }}>
-                    Bénéficiaire validé
-                  </span>
+                  <div className="text-xs text-ink-muted truncate">
+                    {recipient.email || recipient.telephone}
+                  </div>
                 </div>
-                <div className="text-base font-semibold" style={{ color: colors.text }}>
-                  {`${validatedRecipient.prenom || ''} ${validatedRecipient.nom || ''}`.trim()}
-                </div>
-                <div className="text-xs mt-0.5" style={{ color: colors.textSecondary }}>
-                  {validatedRecipient.email || validatedRecipient.telephone}
-                </div>
+                <button
+                  onClick={() => {
+                    setRecipient(null);
+                    setQuery('');
+                  }}
+                  className="p-1.5 rounded-lg hover:bg-bg-subtle text-ink-muted"
+                  aria-label="Retirer"
+                >
+                  <X size={16} />
+                </button>
               </div>
             )}
+          </Card>
 
-            {/* Montant */}
+          {/* Amount + motif */}
+          <Card padding="md">
+            <h3 className="text-sm font-bold mb-4">Montant & motif</h3>
+
             <div>
-              <label className="text-xs font-semibold mb-2 block" style={{ color: colors.textSecondary }}>
-                Montant (Ar)
-              </label>
-              <div
-                className="flex items-center gap-2 px-3 py-2.5 rounded-xl border"
-                style={{ borderColor: colors.border, background: colors.card }}
-              >
-                <DollarSign size={20} style={{ color: colors.textSecondary }} />
+              <label className="label">Montant à envoyer</label>
+              <div className="relative">
                 <input
-                  className="flex-1 bg-transparent outline-none text-lg font-semibold"
-                  style={{ color: colors.text }}
-                  placeholder="0"
+                  type="text"
+                  inputMode="numeric"
                   value={amount}
                   onChange={(e) => setAmount(e.target.value.replace(/[^\d.]/g, ''))}
-                  inputMode="numeric"
+                  placeholder="0"
+                  className="input text-3xl font-bold py-4 pr-16"
                 />
+                <span className="absolute right-4 top-1/2 -translate-y-1/2 text-ink-dim text-base font-semibold">
+                  Ar
+                </span>
               </div>
-              <div className="text-xs mt-1.5" style={{ color: colors.textSecondary }}>
-                Min: {MIN_AMOUNT.toLocaleString('fr-FR')} Ar | Max: {MAX_AMOUNT.toLocaleString('fr-FR')} Ar
-              </div>
-              {amount && !isAmountValid && (
-                <div className="text-red-400 text-xs mt-1">
-                  Le montant doit être entre {MIN_AMOUNT.toLocaleString('fr-FR')} et{' '}
-                  {MAX_AMOUNT.toLocaleString('fr-FR')} Ar
-                </div>
-              )}
-            </div>
 
-            {/* Aperçu des frais */}
-            {amount && amountNum > 0 && isAmountValid && (
-              <div className="card p-3.5 space-y-2">
-                <div className="flex justify-between text-sm">
-                  <span style={{ color: colors.textSecondary }}>Montant</span>
-                  <span style={{ color: colors.text }}>{amountNum.toLocaleString('fr-FR')} Ar</span>
-                </div>
-                <div className="flex justify-between text-sm">
-                  <span style={{ color: colors.textSecondary }}>Frais ({feePercentLabel})</span>
-                  <span style={{ color: fee > 0 ? colors.warning : colors.success }}>
-                    {fee > 0 ? `${fee.toLocaleString('fr-FR')} Ar` : 'Gratuit ✨'}
+              <div className="flex justify-between text-xs mt-2">
+                <span className="text-ink-dim">
+                  Min : {MIN.toLocaleString('fr-FR')} Ar · Max : {MAX.toLocaleString('fr-FR')} Ar
+                </span>
+                {amount && !isAmountOk && (
+                  <span className="text-danger-400 font-semibold">
+                    Montant hors limites
                   </span>
-                </div>
-                {feeCalc?.appliedRule && (
-                  <div className="text-[10px] -mt-1" style={{ color: colors.textSecondary }}>
-                    {feeCalc.appliedRule}
-                  </div>
                 )}
-                <div className="h-px" style={{ background: colors.border }} />
-                <div className="flex justify-between text-sm">
-                  <span className="font-semibold" style={{ color: colors.text }}>
-                    Total à débiter
-                  </span>
-                  <span
-                    className="font-bold"
-                    style={{ color: hasEnoughBalance ? colors.primary : colors.error }}
+              </div>
+
+              {/* Quick amounts */}
+              <div className="flex gap-2 mt-3 flex-wrap">
+                {[5000, 10000, 25000, 50000, 100000].map((preset) => (
+                  <button
+                    key={preset}
+                    onClick={() => setAmount(String(preset))}
+                    className="px-3 py-1.5 text-xs font-semibold rounded-lg bg-bg-elevated border border-bg-border hover:border-brand-500/50 hover:text-brand-300"
                   >
-                    {totalDebit.toLocaleString('fr-FR')} Ar
-                  </span>
-                </div>
-                {!hasEnoughBalance && (
-                  <div className="text-red-400 text-xs">
-                    Solde insuffisant. Solde disponible : {formatCurrency(balance)}
-                  </div>
-                )}
-              </div>
-            )}
-
-            {/* Motif */}
-            <div>
-              <label className="text-xs font-semibold mb-2 block" style={{ color: colors.textSecondary }}>
-                Motif (optionnel)
-              </label>
-              <div
-                className="flex items-center gap-2 px-3 py-2.5 rounded-xl border"
-                style={{ borderColor: colors.border, background: colors.card }}
-              >
-                <FileText size={20} style={{ color: colors.textSecondary }} />
-                <input
-                  className="flex-1 bg-transparent outline-none text-sm"
-                  style={{ color: colors.text }}
-                  placeholder="Ex : Remboursement, Cadeau, Salaire..."
-                  value={motif}
-                  onChange={(e) => setMotif(e.target.value)}
-                />
+                    {preset.toLocaleString('fr-FR')} Ar
+                  </button>
+                ))}
               </div>
             </div>
 
-            {/* Récapitulatif */}
-            {isFormValid && (
-              <div
-                className="p-3.5 rounded-xl border space-y-2"
-                style={{
-                  background: `${colors.primary}10`,
-                  borderColor: colors.primary,
-                }}
-              >
-                <div className="text-sm font-bold" style={{ color: colors.primary }}>
-                  Récapitulatif du transfert
-                </div>
-                <SumRow label="Destinataire" value={`${validatedRecipient?.prenom || ''} ${validatedRecipient?.nom || ''}`.trim()} colors={colors} />
-                <SumRow label="Contact" value={toPhone} colors={colors} />
-                <SumRow label="Montant" value={`${amountNum.toLocaleString('fr-FR')} Ar`} colors={colors} bold />
-                {motif && <SumRow label="Motif" value={motif} colors={colors} />}
-              </div>
-            )}
+            <div className="mt-5">
+              <Input
+                label="Motif (optionnel)"
+                icon={FileText}
+                placeholder="Remboursement, cadeau, salaire..."
+                value={motif}
+                onChange={(e) => setMotif(e.target.value)}
+                maxLength={120}
+              />
+            </div>
+          </Card>
 
-            <button
-              onClick={handleSubmit}
-              disabled={!isFormValid || loading}
-              className="w-full flex items-center justify-center gap-2 py-3.5 rounded-xl font-bold text-white"
-              style={{
-                background: isFormValid ? colors.primary : '#475569',
-                opacity: loading ? 0.7 : 1,
-              }}
-            >
-              {loading ? (
-                <Loader2 className="animate-spin" size={20} />
-              ) : (
-                <>
-                  <Send size={20} />
-                  Effectuer le transfert
-                </>
+          {/* Submit button */}
+          <Button
+            variant="primary"
+            size="lg"
+            fullWidth
+            disabled={!canSend}
+            icon={Send}
+            onClick={() => setConfirmOpen(true)}
+          >
+            Continuer
+            {amount && isAmountOk && (
+              <span className="ml-1 opacity-80">
+                · {amountNum.toLocaleString('fr-FR')} Ar
+              </span>
+            )}
+          </Button>
+        </div>
+
+        {/* === Right rail (1/3) === */}
+        <div className="space-y-4">
+          {/* Live receipt */}
+          <Card padding="md">
+            <div className="flex items-center gap-2 mb-3">
+              <Sparkles size={14} className="text-brand-300" />
+              <h3 className="text-sm font-bold">Aperçu</h3>
+            </div>
+            <div className="space-y-2.5 text-sm">
+              <Row label="Solde" value={formatCurrency(balance)} mute />
+              <div className="h-px bg-bg-border" />
+              <Row
+                label="Montant"
+                value={amount ? `${amountNum.toLocaleString('fr-FR')} Ar` : '—'}
+              />
+              <Row
+                label={`Frais (${feePct})`}
+                value={
+                  fee > 0 ? (
+                    <span className="text-warning-400">
+                      {fee.toLocaleString('fr-FR')} Ar
+                    </span>
+                  ) : (
+                    <span className="text-success-400">Gratuit ✨</span>
+                  )
+                }
+              />
+              {feeCalc?.appliedRule && (
+                <div className="text-[10px] text-ink-dim -mt-1">
+                  {feeCalc.appliedRule}
+                </div>
               )}
-            </button>
-          </div>
-        )}
+              <div className="h-px bg-bg-border" />
+              <Row
+                label="Total débité"
+                value={
+                  <span
+                    className={`font-bold text-base ${
+                      hasBalance ? 'text-ink' : 'text-danger-400'
+                    }`}
+                  >
+                    {total > 0 ? `${total.toLocaleString('fr-FR')} Ar` : '—'}
+                  </span>
+                }
+                bold
+              />
+              {!hasBalance && amount && (
+                <div className="text-[11px] text-danger-400 font-semibold mt-1">
+                  Solde insuffisant
+                </div>
+              )}
+            </div>
+          </Card>
 
-        {step === 2 && (
-          <div className="flex flex-col items-center justify-center pt-20 px-5">
-            <Loader2 size={64} className="animate-spin mb-4" style={{ color: colors.primary }} />
-            <div className="text-lg font-bold mb-1" style={{ color: colors.text }}>
-              Transfert en cours...
-            </div>
-            <div className="text-sm" style={{ color: colors.textSecondary }}>
-              Veuillez patienter
-            </div>
-            <div
-              className="card mt-6 p-5 w-full max-w-sm text-center"
-              style={{ borderColor: colors.border }}
-            >
-              <div className="text-xs" style={{ color: colors.textSecondary }}>
-                Détails du transfert
+          {/* Favorites */}
+          {favorites.length > 0 && (
+            <Card padding="md">
+              <div className="flex items-center justify-between mb-3">
+                <h3 className="text-sm font-bold flex items-center gap-1.5">
+                  <Star size={14} className="text-warning-400" fill="currentColor" />
+                  Favoris
+                </h3>
               </div>
-              <div className="text-2xl font-extrabold mt-2" style={{ color: colors.text }}>
-                {amountNum.toLocaleString('fr-FR')} Ar
+              <div className="grid grid-cols-3 gap-2">
+                {favorites.map((b) => (
+                  <button
+                    key={b.id}
+                    onClick={() => pickFromBeneficiary(b)}
+                    className="flex flex-col items-center gap-1.5 p-2 rounded-xl hover:bg-bg-subtle"
+                  >
+                    <Avatar name={b.name} size="md" />
+                    <span className="text-[10px] font-medium text-center truncate w-full">
+                      {b.name.split(' ')[0]}
+                    </span>
+                  </button>
+                ))}
               </div>
-              <div className="text-sm mt-1" style={{ color: colors.textSecondary }}>
-                vers {validatedRecipient?.prenom || toPhone}
-              </div>
-            </div>
-          </div>
-        )}
+            </Card>
+          )}
 
-        {step === 3 && (
-          <div className="flex flex-col items-center justify-center pt-16 px-5">
-            <div
-              className="w-24 h-24 rounded-full flex items-center justify-center mb-4"
-              style={{ background: `${colors.success}20` }}
-            >
-              <CheckCircle2 size={60} style={{ color: colors.success }} />
-            </div>
-            <div className="text-2xl font-extrabold mb-2" style={{ color: colors.text }}>
-              Transfert réussi !
-            </div>
-            <div className="text-3xl font-extrabold" style={{ color: colors.success }}>
-              {amountNum.toLocaleString('fr-FR')} Ar
-            </div>
-            <div className="text-sm mt-2" style={{ color: colors.textSecondary }}>
-              envoyés à {validatedRecipient?.prenom || toPhone}
-            </div>
-            <div className="flex gap-3 mt-6 w-full max-w-sm">
+          {/* Recent beneficiaries */}
+          <Card padding="md">
+            <div className="flex items-center justify-between mb-3">
+              <h3 className="text-sm font-bold">Bénéficiaires</h3>
               <button
-                onClick={resetForm}
-                className="flex-1 py-3 rounded-xl font-semibold text-white"
-                style={{ background: colors.primary }}
+                onClick={() => navigate('/beneficiaries')}
+                className="text-xs text-brand-300 font-semibold hover:text-brand-200"
+              >
+                Tout
+              </button>
+            </div>
+            {recents.length === 0 ? (
+              <Empty
+                icon={Users}
+                title="Aucun bénéficiaire"
+                description="Ajoutez-en pour les retrouver ici"
+                className="py-6"
+              />
+            ) : (
+              <div className="space-y-1">
+                {recents.map((b) => (
+                  <button
+                    key={b.id}
+                    onClick={() => pickFromBeneficiary(b)}
+                    className="w-full flex items-center gap-2.5 p-2 rounded-lg hover:bg-bg-elevated text-left"
+                  >
+                    <Avatar name={b.name} size="sm" />
+                    <div className="flex-1 min-w-0">
+                      <div className="text-xs font-semibold truncate">
+                        {b.name}
+                      </div>
+                      <div className="text-[10px] text-ink-muted truncate">
+                        {b.phone}
+                      </div>
+                    </div>
+                    <ChevronRight size={12} className="text-ink-dim" />
+                  </button>
+                ))}
+              </div>
+            )}
+          </Card>
+        </div>
+      </div>
+
+      {/* === Confirmation modal === */}
+      {confirmOpen && recipient && (
+        <div className="fixed inset-0 z-50 bg-black/70 backdrop-blur-sm flex items-center justify-center p-4 animate-fade-in">
+          <Card padding="lg" className="max-w-md w-full animate-slide-in">
+            <div className="flex items-center justify-between mb-5">
+              <h3 className="text-lg font-bold">Confirmer le transfert</h3>
+              <button
+                onClick={() => setConfirmOpen(false)}
+                className="p-1.5 rounded-lg hover:bg-bg-subtle text-ink-muted"
+              >
+                <X size={18} />
+              </button>
+            </div>
+
+            <div className="flex items-center gap-3 p-3 rounded-xl bg-bg-elevated mb-4">
+              <Avatar
+                name={`${recipient.prenom || ''} ${recipient.nom || ''}`.trim() || recipient.email}
+                size="lg"
+              />
+              <div className="flex-1 min-w-0">
+                <div className="text-sm text-ink-muted">Destinataire</div>
+                <div className="text-base font-bold truncate">
+                  {`${recipient.prenom || ''} ${recipient.nom || ''}`.trim() || 'Bénéficiaire'}
+                </div>
+                <div className="text-xs text-ink-muted truncate">
+                  {recipient.email || recipient.telephone}
+                </div>
+              </div>
+            </div>
+
+            <div className="space-y-2.5 text-sm mb-5">
+              <Row
+                label="Montant"
+                value={`${amountNum.toLocaleString('fr-FR')} Ar`}
+              />
+              <Row
+                label="Frais"
+                value={
+                  fee > 0 ? (
+                    <span className="text-warning-400">
+                      {fee.toLocaleString('fr-FR')} Ar
+                    </span>
+                  ) : (
+                    <span className="text-success-400">Gratuit</span>
+                  )
+                }
+              />
+              {motif && <Row label="Motif" value={motif} />}
+              <div className="h-px bg-bg-border my-2" />
+              <Row
+                label="Total"
+                value={
+                  <span className="font-bold text-base">
+                    {total.toLocaleString('fr-FR')} Ar
+                  </span>
+                }
+                bold
+              />
+            </div>
+
+            <div className="flex gap-2">
+              <Button
+                variant="secondary"
+                size="md"
+                fullWidth
+                onClick={() => setConfirmOpen(false)}
+                disabled={loading}
+              >
+                Annuler
+              </Button>
+              <Button
+                variant="primary"
+                size="md"
+                fullWidth
+                loading={loading}
+                icon={Check}
+                onClick={doSend}
+              >
+                Confirmer
+              </Button>
+            </div>
+          </Card>
+        </div>
+      )}
+
+      {/* === Success modal === */}
+      {success && (
+        <div className="fixed inset-0 z-50 bg-black/70 backdrop-blur-sm flex items-center justify-center p-4 animate-fade-in">
+          <Card padding="lg" className="max-w-md w-full text-center animate-slide-in">
+            <div className="w-20 h-20 mx-auto rounded-full bg-success-bg flex items-center justify-center mb-4">
+              <CheckCircle2 size={56} className="text-success-400" />
+            </div>
+            <div className="text-2xl font-bold mb-1">Transfert réussi !</div>
+            <div className="text-3xl font-extrabold text-success-400 mb-2">
+              {success.amt.toLocaleString('fr-FR')} Ar
+            </div>
+            <div className="text-sm text-ink-muted mb-6">
+              envoyés à <span className="font-bold text-ink">{success.to}</span>
+            </div>
+            <div className="flex gap-2">
+              <Button
+                variant="secondary"
+                size="md"
+                fullWidth
+                onClick={() => navigate('/dashboard')}
+              >
+                Tableau de bord
+              </Button>
+              <Button
+                variant="primary"
+                size="md"
+                fullWidth
+                onClick={reset}
               >
                 Nouveau transfert
-              </button>
-              <button
-                onClick={() => navigate('/dashboard')}
-                className="flex-1 py-3 rounded-xl font-semibold border"
-                style={{ borderColor: colors.border, color: colors.text }}
-              >
-                Retour
-              </button>
+              </Button>
             </div>
-          </div>
-        )}
-      </div>
+          </Card>
+        </div>
+      )}
     </div>
   );
 }
 
-function SumRow({
+function Row({
   label,
   value,
-  colors,
+  mute,
   bold,
 }: {
   label: string;
-  value: string;
-  colors: any;
+  value: React.ReactNode;
+  mute?: boolean;
   bold?: boolean;
 }) {
   return (
-    <div className="flex justify-between text-sm">
-      <span style={{ color: colors.textSecondary }}>{label}</span>
-      <span style={{ color: colors.text, fontWeight: bold ? 700 : 400 }}>{value}</span>
+    <div className="flex justify-between items-center">
+      <span className={`${mute ? 'text-ink-dim' : 'text-ink-muted'} ${bold ? 'text-ink' : ''}`}>
+        {label}
+      </span>
+      <span className={`text-right ${bold ? 'font-bold' : ''}`}>{value}</span>
     </div>
   );
 }

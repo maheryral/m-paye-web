@@ -2,23 +2,39 @@ import {
   ArrowLeft,
   ArrowRight,
   Building2,
+  Check,
   CheckCircle2,
   CreditCard,
   FileText,
-  Loader2,
+  Image as ImageIcon,
+  Info,
+  Send,
   Upload,
   X,
+  type LucideIcon,
 } from 'lucide-react';
 import { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import GradientHeader from '../../components/GradientHeader';
-import { useColors } from '../../contexts/ThemeContext';
 import { merchantApi } from '../../services/merchantApi';
+import { Badge, Button, Card, Input, PageHeader } from '../../ui';
 
 interface DocSlot {
   file: File | null;
   preview: string | null;
 }
+
+interface Step {
+  id: number;
+  label: string;
+  description: string;
+  icon: LucideIcon;
+}
+
+const STEPS: Step[] = [
+  { id: 1, label: 'Entreprise', description: 'Informations légales', icon: Building2 },
+  { id: 2, label: 'Documents', description: 'Pièces justificatives', icon: FileText },
+  { id: 3, label: 'Banque', description: 'Coordonnées de paiement', icon: CreditCard },
+];
 
 const BUSINESS_TYPES = [
   'Commerce de détail',
@@ -34,8 +50,6 @@ const BUSINESS_TYPES = [
 
 export default function MerchantSignup() {
   const navigate = useNavigate();
-  const colors = useColors();
-
   const [step, setStep] = useState(1);
   const [loading, setLoading] = useState(false);
   const [success, setSuccess] = useState(false);
@@ -67,10 +81,10 @@ export default function MerchantSignup() {
     bic: '',
   });
 
-  const update = (patch: Partial<typeof info>) => setInfo((f) => ({ ...f, ...patch }));
-  const updateBank = (patch: Partial<typeof bank>) => setBank((f) => ({ ...f, ...patch }));
+  const upd = (patch: Partial<typeof info>) => setInfo((f) => ({ ...f, ...patch }));
+  const updBank = (patch: Partial<typeof bank>) => setBank((f) => ({ ...f, ...patch }));
 
-  const handleFileChange = (key: keyof typeof docs, file: File | null) => {
+  const onFile = (key: keyof typeof docs, file: File | null) => {
     if (!file) {
       setDocs((d) => ({ ...d, [key]: { file: null, preview: null } }));
       return;
@@ -80,52 +94,43 @@ export default function MerchantSignup() {
       return;
     }
     const reader = new FileReader();
-    reader.onload = (e) => {
+    reader.onload = (e) =>
       setDocs((d) => ({
         ...d,
         [key]: { file, preview: e.target?.result as string },
       }));
-    };
     reader.readAsDataURL(file);
   };
 
-  const validateStep1 = () => {
-    if (!info.businessName.trim()) return "Nom d'entreprise requis";
-    if (!info.businessType) return 'Type d\'activité requis';
-    if (!info.registrationNumber.trim()) return "Numéro d'enregistrement requis";
-    if (!info.phone.trim()) return 'Téléphone requis';
-    if (!info.email.includes('@')) return 'Email invalide';
-    return null;
-  };
-
-  const validateStep2 = () => {
-    if (!docs.registrationDoc.file) return "Document d'enregistrement requis";
-    if (!docs.idDoc.file) return "Pièce d'identité requise";
-    return null;
-  };
-
-  const validateStep3 = () => {
-    if (!bank.bankName.trim()) return 'Banque requise';
-    if (!bank.accountNumber.trim()) return 'Numéro de compte requis';
-    if (!bank.accountHolder.trim()) return 'Titulaire requis';
-    return null;
-  };
-
-  const goNext = () => {
-    const err = step === 1 ? validateStep1() : step === 2 ? validateStep2() : null;
-    if (err) {
-      alert(err);
-      return;
+  const validate = (s: number): string | null => {
+    if (s === 1) {
+      if (!info.businessName.trim()) return "Nom d'entreprise requis";
+      if (!info.businessType) return "Type d'activité requis";
+      if (!info.registrationNumber.trim()) return "Numéro d'enregistrement requis";
+      if (!info.phone.trim()) return 'Téléphone requis';
+      if (!info.email.includes('@')) return 'Email invalide';
     }
+    if (s === 2) {
+      if (!docs.registrationDoc.file) return "Document d'enregistrement requis";
+      if (!docs.idDoc.file) return "Pièce d'identité requise";
+    }
+    if (s === 3) {
+      if (!bank.bankName.trim()) return 'Banque requise';
+      if (!bank.accountNumber.trim()) return 'Numéro de compte requis';
+      if (!bank.accountHolder.trim()) return 'Titulaire requis';
+    }
+    return null;
+  };
+
+  const next = () => {
+    const err = validate(step);
+    if (err) return alert(err);
     setStep(step + 1);
   };
 
-  const handleSubmit = async () => {
-    const err = validateStep3();
-    if (err) {
-      alert(err);
-      return;
-    }
+  const submit = async () => {
+    const err = validate(3);
+    if (err) return alert(err);
     setLoading(true);
     try {
       const fd = new FormData();
@@ -145,360 +150,375 @@ export default function MerchantSignup() {
 
   if (success) {
     return (
-      <div className="min-h-screen bg-bg flex items-center justify-center p-5">
-        <div className="card max-w-md w-full p-8 text-center">
-          <div
-            className="w-20 h-20 mx-auto rounded-full flex items-center justify-center mb-4"
-            style={{ background: `${colors.success}20` }}
-          >
-            <CheckCircle2 size={56} style={{ color: colors.success }} />
+      <div className="space-y-6 animate-fade-in max-w-2xl mx-auto">
+        <Card padding="lg" className="text-center">
+          <div className="w-24 h-24 mx-auto rounded-full bg-success-bg flex items-center justify-center mb-5">
+            <CheckCircle2 size={56} className="text-success-400" />
           </div>
-          <div className="text-2xl font-extrabold mb-2" style={{ color: colors.text }}>
-            Demande envoyée !
+          <h2 className="text-2xl font-bold mb-2">Demande envoyée !</h2>
+          <p className="text-sm text-ink-muted max-w-sm mx-auto mb-6">
+            Votre dossier marchand est en cours de vérification.
+            Vous recevrez une notification sous 24-72h.
+          </p>
+          <div className="grid grid-cols-3 gap-3 mb-6 max-w-md mx-auto">
+            {[
+              { label: 'Soumis', done: true },
+              { label: 'En vérification', done: false, active: true },
+              { label: 'Activé', done: false },
+            ].map((s, i) => (
+              <div
+                key={s.label}
+                className={`p-3 rounded-xl text-xs font-semibold ${
+                  s.done
+                    ? 'bg-success-bg text-success-400'
+                    : (s as any).active
+                      ? 'bg-warning-bg text-warning-400'
+                      : 'bg-bg-elevated text-ink-dim'
+                }`}
+              >
+                {i + 1}. {s.label}
+              </div>
+            ))}
           </div>
-          <div className="text-sm mb-6" style={{ color: colors.textSecondary }}>
-            Votre dossier marchand est en cours de vérification. Vous serez notifié sous 24-72h.
-          </div>
-          <button
-            onClick={() => navigate('/dashboard')}
-            className="w-full py-3 rounded-xl font-bold text-white"
-            style={{ background: colors.primary }}
-          >
-            Retour à l'accueil
-          </button>
-        </div>
+          <Button variant="primary" size="lg" onClick={() => navigate('/dashboard')}>
+            Retour au tableau de bord
+          </Button>
+        </Card>
       </div>
     );
   }
 
-  const steps = [
-    { id: 1, label: 'Entreprise', icon: Building2 },
-    { id: 2, label: 'Documents', icon: FileText },
-    { id: 3, label: 'Banque', icon: CreditCard },
-  ];
+  const currentStep = STEPS[step - 1];
 
   return (
-    <div className="min-h-screen bg-bg pb-8">
-      <div className="max-w-2xl mx-auto">
-        <GradientHeader title="Devenir marchand" subtitle="Acceptez les paiements de vos clients" />
+    <div className="space-y-6 animate-fade-in">
+      <PageHeader
+        title="Devenir marchand"
+        subtitle="Acceptez des paiements en ligne et en boutique avec M'Paye Pro"
+      />
 
-        {/* Stepper */}
-        <div className="px-5 mt-4">
-          <div className="flex items-center justify-between">
-            {steps.map((s, i) => {
-              const Icon = s.icon;
-              const done = s.id < step;
-              const current = s.id === step;
-              return (
-                <div key={s.id} className="flex items-center flex-1">
-                  <div className="flex flex-col items-center">
-                    <div
-                      className="w-10 h-10 rounded-full flex items-center justify-center"
-                      style={{
-                        background: done
-                          ? colors.success
-                          : current
-                            ? colors.primary
-                            : colors.card,
-                        color: done || current ? '#fff' : colors.textSecondary,
-                        border: `2px solid ${done ? colors.success : current ? colors.primary : colors.border}`,
-                      }}
-                    >
-                      {done ? <CheckCircle2 size={18} /> : <Icon size={18} />}
+      {/* Stepper */}
+      <Card padding="md">
+        <div className="grid grid-cols-3 gap-2">
+          {STEPS.map((s) => {
+            const Icon = s.icon;
+            const done = s.id < step;
+            const current = s.id === step;
+            return (
+              <div key={s.id} className="relative">
+                <div
+                  className={`p-3.5 rounded-xl flex items-center gap-3 transition-all ${
+                    current
+                      ? 'bg-gradient-brand-soft border border-brand-500/30'
+                      : done
+                        ? 'bg-success-bg/40 border border-success-500/20'
+                        : 'bg-bg-elevated/40 border border-bg-border'
+                  }`}
+                >
+                  <div
+                    className={`w-9 h-9 rounded-xl flex items-center justify-center shrink-0 ${
+                      done
+                        ? 'bg-success-500 text-white'
+                        : current
+                          ? 'bg-gradient-brand text-white shadow-glow-soft'
+                          : 'bg-bg-elevated text-ink-dim border border-bg-border'
+                    }`}
+                  >
+                    {done ? <Check size={16} strokeWidth={3} /> : <Icon size={16} />}
+                  </div>
+                  <div className="min-w-0 hidden sm:block">
+                    <div className="text-[10px] uppercase tracking-wider text-ink-dim font-bold">
+                      Étape {s.id}
                     </div>
                     <div
-                      className="text-xs mt-1.5 font-medium"
-                      style={{ color: current ? colors.primary : colors.textSecondary }}
+                      className={`text-sm font-bold truncate ${
+                        current || done ? 'text-ink' : 'text-ink-muted'
+                      }`}
                     >
                       {s.label}
                     </div>
                   </div>
-                  {i < steps.length - 1 && (
-                    <div
-                      className="h-0.5 flex-1 mx-2 -mt-5"
-                      style={{ background: done ? colors.success : colors.border }}
-                    />
-                  )}
                 </div>
-              );
-            })}
-          </div>
+              </div>
+            );
+          })}
         </div>
+      </Card>
 
-        <div className="px-5 mt-6 space-y-4">
-          {step === 1 && (
-            <>
-              <Field
-                label="Nom de l'entreprise *"
-                value={info.businessName}
-                onChange={(v) => update({ businessName: v })}
-                colors={colors}
-                placeholder="Ma Société SARL"
-              />
+      <div className="grid grid-cols-1 lg:grid-cols-3 gap-5">
+        {/* Form (2/3) */}
+        <div className="lg:col-span-2">
+          <Card padding="md">
+            <div className="flex items-center gap-3 mb-5 pb-4 border-b border-bg-border">
+              <div className="w-11 h-11 rounded-xl bg-gradient-brand flex items-center justify-center text-white">
+                <currentStep.icon size={18} />
+              </div>
               <div>
-                <label className="text-xs font-semibold mb-1.5 block" style={{ color: colors.textSecondary }}>
-                  Type d'activité *
-                </label>
-                <select
-                  className="w-full bg-transparent border rounded-xl px-3 py-2.5 text-sm outline-none"
-                  style={{ color: colors.text, borderColor: colors.border, background: colors.card }}
-                  value={info.businessType}
-                  onChange={(e) => update({ businessType: e.target.value })}
-                >
-                  <option value="">Sélectionnez un type</option>
-                  {BUSINESS_TYPES.map((t) => (
-                    <option key={t} value={t}>
-                      {t}
-                    </option>
-                  ))}
-                </select>
+                <h3 className="text-base font-bold">{currentStep.label}</h3>
+                <p className="text-xs text-ink-muted">{currentStep.description}</p>
               </div>
-              <Field
-                label="Numéro d'enregistrement *"
-                value={info.registrationNumber}
-                onChange={(v) => update({ registrationNumber: v })}
-                colors={colors}
-                placeholder="NIF / RCS"
-              />
-              <Field
-                label="Numéro fiscal (TVA)"
-                value={info.taxId}
-                onChange={(v) => update({ taxId: v })}
-                colors={colors}
-              />
-              <Field
-                label="Adresse *"
-                value={info.address}
-                onChange={(v) => update({ address: v })}
-                colors={colors}
-              />
-              <div className="grid grid-cols-2 gap-3">
-                <Field
-                  label="Ville *"
-                  value={info.city}
-                  onChange={(v) => update({ city: v })}
-                  colors={colors}
-                />
-                <Field
-                  label="Téléphone *"
-                  value={info.phone}
-                  onChange={(v) => update({ phone: v })}
-                  colors={colors}
-                  type="tel"
-                />
-              </div>
-              <Field
-                label="Email *"
-                value={info.email}
-                onChange={(v) => update({ email: v })}
-                colors={colors}
-                type="email"
-              />
-              <Field
-                label="Site web"
-                value={info.website}
-                onChange={(v) => update({ website: v })}
-                colors={colors}
-                placeholder="https://..."
-              />
-              <div>
-                <label className="text-xs font-semibold mb-1.5 block" style={{ color: colors.textSecondary }}>
-                  Description
-                </label>
-                <textarea
-                  className="w-full bg-transparent border rounded-xl px-3 py-2.5 text-sm outline-none resize-none"
-                  style={{ color: colors.text, borderColor: colors.border }}
-                  rows={3}
-                  value={info.description}
-                  onChange={(e) => update({ description: e.target.value })}
-                  placeholder="Décrivez brièvement votre activité"
-                />
-              </div>
-            </>
-          )}
+            </div>
 
-          {step === 2 && (
-            <>
-              <FileUpload
-                label="Document d'enregistrement *"
-                description="Statuts, RCS, etc."
-                slot={docs.registrationDoc}
-                onChange={(f) => handleFileChange('registrationDoc', f)}
-                colors={colors}
-              />
-              <FileUpload
-                label="Document fiscal"
-                description="Attestation fiscale"
-                slot={docs.taxDoc}
-                onChange={(f) => handleFileChange('taxDoc', f)}
-                colors={colors}
-              />
-              <FileUpload
-                label="Pièce d'identité du dirigeant *"
-                description="CIN, passeport, permis"
-                slot={docs.idDoc}
-                onChange={(f) => handleFileChange('idDoc', f)}
-                colors={colors}
-              />
-            </>
-          )}
-
-          {step === 3 && (
-            <>
-              <Field
-                label="Banque *"
-                value={bank.bankName}
-                onChange={(v) => updateBank({ bankName: v })}
-                colors={colors}
-                placeholder="BNI, BFV, BOA..."
-              />
-              <Field
-                label="Titulaire du compte *"
-                value={bank.accountHolder}
-                onChange={(v) => updateBank({ accountHolder: v })}
-                colors={colors}
-              />
-              <Field
-                label="Numéro de compte *"
-                value={bank.accountNumber}
-                onChange={(v) => updateBank({ accountNumber: v })}
-                colors={colors}
-              />
-              <div className="grid grid-cols-2 gap-3">
-                <Field label="IBAN" value={bank.iban} onChange={(v) => updateBank({ iban: v })} colors={colors} />
-                <Field label="BIC / SWIFT" value={bank.bic} onChange={(v) => updateBank({ bic: v })} colors={colors} />
+            {step === 1 && (
+              <div className="space-y-4">
+                <Input
+                  label="Nom de l'entreprise *"
+                  placeholder="Ma Société SARL"
+                  value={info.businessName}
+                  onChange={(e) => upd({ businessName: e.target.value })}
+                />
+                <div>
+                  <label className="label">Type d'activité *</label>
+                  <select
+                    className="input"
+                    value={info.businessType}
+                    onChange={(e) => upd({ businessType: e.target.value })}
+                  >
+                    <option value="">Sélectionnez un type</option>
+                    {BUSINESS_TYPES.map((t) => (
+                      <option key={t} value={t}>{t}</option>
+                    ))}
+                  </select>
+                </div>
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                  <Input
+                    label="Numéro d'enregistrement *"
+                    placeholder="NIF / RCS"
+                    value={info.registrationNumber}
+                    onChange={(e) => upd({ registrationNumber: e.target.value })}
+                  />
+                  <Input
+                    label="Numéro fiscal (TVA)"
+                    value={info.taxId}
+                    onChange={(e) => upd({ taxId: e.target.value })}
+                  />
+                </div>
+                <Input
+                  label="Adresse *"
+                  value={info.address}
+                  onChange={(e) => upd({ address: e.target.value })}
+                />
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                  <Input
+                    label="Ville *"
+                    value={info.city}
+                    onChange={(e) => upd({ city: e.target.value })}
+                  />
+                  <Input
+                    label="Téléphone *"
+                    type="tel"
+                    value={info.phone}
+                    onChange={(e) => upd({ phone: e.target.value })}
+                  />
+                </div>
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                  <Input
+                    label="Email *"
+                    type="email"
+                    value={info.email}
+                    onChange={(e) => upd({ email: e.target.value })}
+                  />
+                  <Input
+                    label="Site web"
+                    placeholder="https://..."
+                    value={info.website}
+                    onChange={(e) => upd({ website: e.target.value })}
+                  />
+                </div>
+                <div>
+                  <label className="label">Description</label>
+                  <textarea
+                    className="input resize-none"
+                    rows={3}
+                    placeholder="Décrivez brièvement votre activité"
+                    value={info.description}
+                    onChange={(e) => upd({ description: e.target.value })}
+                  />
+                </div>
               </div>
-              <div
-                className="p-3 rounded-xl text-xs"
-                style={{ background: `${colors.warning}15`, color: colors.warning }}
-              >
-                Ces informations sont utilisées pour vous reverser les paiements reçus.
-              </div>
-            </>
-          )}
+            )}
 
-          {/* Navigation */}
-          <div className="flex gap-3 pt-2">
-            {step > 1 && (
-              <button
+            {step === 2 && (
+              <div className="space-y-4">
+                <FileDrop
+                  id="registrationDoc"
+                  label="Document d'enregistrement *"
+                  description="Statuts de la société, RCS, K-bis…"
+                  slot={docs.registrationDoc}
+                  onChange={(f) => onFile('registrationDoc', f)}
+                />
+                <FileDrop
+                  id="taxDoc"
+                  label="Document fiscal"
+                  description="Attestation fiscale (optionnel)"
+                  slot={docs.taxDoc}
+                  onChange={(f) => onFile('taxDoc', f)}
+                />
+                <FileDrop
+                  id="idDoc"
+                  label="Pièce d'identité du dirigeant *"
+                  description="CIN, passeport, permis de conduire"
+                  slot={docs.idDoc}
+                  onChange={(f) => onFile('idDoc', f)}
+                />
+              </div>
+            )}
+
+            {step === 3 && (
+              <div className="space-y-4">
+                <Input
+                  label="Nom de la banque *"
+                  placeholder="BNI, BFV, BOA..."
+                  value={bank.bankName}
+                  onChange={(e) => updBank({ bankName: e.target.value })}
+                />
+                <Input
+                  label="Titulaire du compte *"
+                  placeholder="Identique au nom de l'entreprise"
+                  value={bank.accountHolder}
+                  onChange={(e) => updBank({ accountHolder: e.target.value })}
+                />
+                <Input
+                  label="Numéro de compte *"
+                  placeholder="00012 3456 78901234567"
+                  value={bank.accountNumber}
+                  onChange={(e) => updBank({ accountNumber: e.target.value })}
+                  className="font-mono"
+                />
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                  <Input
+                    label="IBAN"
+                    value={bank.iban}
+                    onChange={(e) => updBank({ iban: e.target.value })}
+                    className="font-mono"
+                  />
+                  <Input
+                    label="BIC / SWIFT"
+                    value={bank.bic}
+                    onChange={(e) => updBank({ bic: e.target.value })}
+                    className="font-mono"
+                  />
+                </div>
+              </div>
+            )}
+
+            {/* Nav */}
+            <div className="flex items-center justify-between gap-2 pt-5 mt-5 border-t border-bg-border">
+              <Button
+                variant="ghost"
+                size="md"
+                icon={ArrowLeft}
                 onClick={() => setStep(step - 1)}
-                className="flex-1 flex items-center justify-center gap-2 py-3 rounded-xl border font-semibold"
-                style={{ borderColor: colors.border, color: colors.text }}
+                disabled={step === 1}
               >
-                <ArrowLeft size={18} />
                 Précédent
-              </button>
-            )}
-            {step < 3 ? (
-              <button
-                onClick={goNext}
-                className="flex-1 flex items-center justify-center gap-2 py-3 rounded-xl font-bold text-white"
-                style={{ background: colors.primary }}
-              >
-                Suivant
-                <ArrowRight size={18} />
-              </button>
-            ) : (
-              <button
-                onClick={handleSubmit}
-                disabled={loading}
-                className="flex-1 flex items-center justify-center gap-2 py-3 rounded-xl font-bold text-white"
-                style={{ background: colors.success, opacity: loading ? 0.7 : 1 }}
-              >
-                {loading ? (
-                  <Loader2 className="animate-spin" size={20} />
-                ) : (
-                  <>
-                    <CheckCircle2 size={18} />
-                    Envoyer la demande
-                  </>
-                )}
-              </button>
-            )}
-          </div>
+              </Button>
+              {step < 3 ? (
+                <Button variant="primary" size="md" iconEnd={ArrowRight} onClick={next}>
+                  Continuer
+                </Button>
+              ) : (
+                <Button
+                  variant="success"
+                  size="md"
+                  icon={Send}
+                  loading={loading}
+                  onClick={submit}
+                >
+                  Soumettre le dossier
+                </Button>
+              )}
+            </div>
+          </Card>
         </div>
+
+        {/* Side info (1/3) */}
+        <Card padding="md" className="lg:sticky lg:top-20 lg:self-start">
+          <Badge tone="brand" icon={<Info size={11} />}>
+            Important
+          </Badge>
+          <h3 className="text-sm font-bold mt-3 mb-2">À savoir avant de soumettre</h3>
+          <ul className="space-y-2.5 text-xs text-ink-muted">
+            {[
+              'La vérification prend 24 à 72h ouvrées',
+              'Vous serez notifié par email et dans l\'app',
+              'Les frais marchand sont 0,8% par transaction',
+              'Versement automatique chaque semaine',
+              'Tableau de bord dédié dès activation',
+            ].map((t, i) => (
+              <li key={i} className="flex items-start gap-2">
+                <Check size={12} className="text-success-400 mt-0.5 shrink-0" strokeWidth={3} />
+                <span>{t}</span>
+              </li>
+            ))}
+          </ul>
+
+          <div className="mt-5 pt-5 border-t border-bg-border">
+            <h4 className="text-xs font-bold uppercase tracking-wider text-ink-dim mb-2">
+              Besoin d'aide ?
+            </h4>
+            <button
+              onClick={() => navigate('/messages')}
+              className="text-xs text-brand-300 font-semibold hover:text-brand-200"
+            >
+              Contacter le support →
+            </button>
+          </div>
+        </Card>
       </div>
     </div>
   );
 }
 
-function Field({
-  label,
-  value,
-  onChange,
-  placeholder,
-  type = 'text',
-  colors,
-}: {
-  label: string;
-  value: string;
-  onChange: (v: string) => void;
-  placeholder?: string;
-  type?: string;
-  colors: any;
-}) {
-  return (
-    <div>
-      <label className="text-xs font-semibold mb-1.5 block" style={{ color: colors.textSecondary }}>
-        {label}
-      </label>
-      <input
-        type={type}
-        className="w-full bg-transparent border rounded-xl px-3 py-2.5 text-sm outline-none"
-        style={{ color: colors.text, borderColor: colors.border }}
-        value={value}
-        onChange={(e) => onChange(e.target.value)}
-        placeholder={placeholder}
-      />
-    </div>
-  );
-}
-
-function FileUpload({
+function FileDrop({
+  id,
   label,
   description,
   slot,
   onChange,
-  colors,
 }: {
+  id: string;
   label: string;
   description: string;
   slot: DocSlot;
   onChange: (f: File | null) => void;
-  colors: any;
 }) {
-  const id = `file-${label.replace(/\s/g, '-')}`;
+  const [dragging, setDragging] = useState(false);
+
+  const onDrop = (e: React.DragEvent) => {
+    e.preventDefault();
+    setDragging(false);
+    const f = e.dataTransfer.files?.[0];
+    if (f) onChange(f);
+  };
+
   return (
     <div>
-      <label className="text-xs font-semibold mb-1.5 block" style={{ color: colors.textSecondary }}>
-        {label}
-      </label>
+      <label className="label">{label}</label>
       {slot.file ? (
-        <div className="card flex items-center gap-3 p-3">
+        <div className="flex items-center gap-3 p-3 rounded-xl bg-bg-elevated border border-success-500/30">
           {slot.preview && slot.file.type.startsWith('image/') ? (
-            <img src={slot.preview} alt="" className="w-12 h-12 rounded-lg object-cover" />
+            <img
+              src={slot.preview}
+              alt=""
+              className="w-12 h-12 rounded-lg object-cover"
+            />
           ) : (
-            <div
-              className="w-12 h-12 rounded-lg flex items-center justify-center"
-              style={{ background: `${colors.primary}20` }}
-            >
-              <FileText size={22} style={{ color: colors.primary }} />
+            <div className="w-12 h-12 rounded-lg bg-brand-500/15 flex items-center justify-center text-brand-300">
+              <FileText size={20} />
             </div>
           )}
           <div className="flex-1 min-w-0">
-            <div className="text-sm font-semibold truncate" style={{ color: colors.text }}>
-              {slot.file.name}
-            </div>
-            <div className="text-xs" style={{ color: colors.textSecondary }}>
-              {(slot.file.size / 1024).toFixed(1)} KB
+            <div className="text-sm font-semibold truncate">{slot.file.name}</div>
+            <div className="text-[11px] text-ink-muted">
+              {(slot.file.size / 1024).toFixed(1)} KB · Téléchargé
             </div>
           </div>
           <button
             onClick={() => onChange(null)}
-            className="w-9 h-9 rounded-lg flex items-center justify-center"
-            style={{ background: `${colors.error}20`, color: colors.error }}
+            className="w-9 h-9 rounded-lg bg-danger-bg text-danger-400 hover:bg-danger-500/30 flex items-center justify-center"
           >
-            <X size={18} />
+            <X size={16} />
           </button>
         </div>
       ) : (
@@ -512,16 +532,30 @@ function FileUpload({
           />
           <label
             htmlFor={id}
-            className="card flex flex-col items-center gap-2 py-6 cursor-pointer hover:bg-white/5"
-            style={{ borderStyle: 'dashed' }}
+            onDragOver={(e) => {
+              e.preventDefault();
+              setDragging(true);
+            }}
+            onDragLeave={() => setDragging(false)}
+            onDrop={onDrop}
+            className={`flex items-center gap-3 p-4 rounded-xl border-2 border-dashed cursor-pointer transition-all ${
+              dragging
+                ? 'border-brand-500 bg-brand-500/10'
+                : 'border-bg-border hover:border-brand-500/50 hover:bg-bg-elevated/40'
+            }`}
           >
-            <Upload size={28} style={{ color: colors.primary }} />
-            <div className="text-sm font-semibold" style={{ color: colors.text }}>
-              Choisir un fichier
+            <div className="w-12 h-12 rounded-xl bg-bg-elevated flex items-center justify-center text-brand-300 shrink-0">
+              <Upload size={20} />
             </div>
-            <div className="text-xs" style={{ color: colors.textSecondary }}>
-              {description} · JPG, PNG, PDF (max 5 MB)
+            <div className="flex-1 min-w-0">
+              <div className="text-sm font-semibold">
+                <span className="text-brand-300">Cliquez pour choisir</span> ou glissez ici
+              </div>
+              <div className="text-[11px] text-ink-muted mt-0.5">
+                {description} · JPG, PNG, PDF (max 5 MB)
+              </div>
             </div>
+            <ImageIcon size={18} className="text-ink-dim shrink-0 hidden sm:block" />
           </label>
         </>
       )}

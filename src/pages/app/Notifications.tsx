@@ -1,20 +1,20 @@
 import {
-  ArrowDownCircle,
-  ArrowUpCircle,
-  Bell,
+  ArrowDownLeft,
+  ArrowUpRight,
   BellOff,
   CheckCheck,
   CheckCircle2,
-  Loader2,
+  Inbox,
+  RefreshCcw,
   Shield,
   User as UserIcon,
+  type LucideIcon,
 } from 'lucide-react';
-import type { LucideIcon } from 'lucide-react';
-import { useEffect, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import GradientHeader from '../../components/GradientHeader';
-import { useColors } from '../../contexts/ThemeContext';
+import { useSocket } from '../../contexts/SocketContext';
 import { notificationService } from '../../services/api';
+import { Badge, Button, Card, Empty, PageHeader, Skeleton } from '../../ui';
 
 interface Notification {
   id: string;
@@ -27,121 +27,115 @@ interface Notification {
   actionId?: string;
 }
 
-const PAGE_SIZE = 20;
+type Category = 'all' | 'unread' | 'transfers' | 'security' | 'system';
 
-function iconForType(type: string): LucideIcon {
+interface CategoryDef {
+  id: Category;
+  label: string;
+  match: (n: Notification) => boolean;
+}
+
+const CATEGORIES: CategoryDef[] = [
+  { id: 'all', label: 'Toutes', match: () => true },
+  { id: 'unread', label: 'Non lues', match: (n) => !n.isRead },
+  {
+    id: 'transfers',
+    label: 'Transferts',
+    match: (n) =>
+      n.type === 'TRANSFER_RECEIVED' ||
+      n.type === 'TRANSFER_SENT' ||
+      n.type === 'DEPOSIT_SUCCESS',
+  },
+  {
+    id: 'security',
+    label: 'Sécurité',
+    match: (n) => n.type === 'SECURITY_ALERT' || n.type === 'KYC_REMINDER',
+  },
+  {
+    id: 'system',
+    label: 'Système',
+    match: (n) =>
+      !['TRANSFER_RECEIVED', 'TRANSFER_SENT', 'DEPOSIT_SUCCESS', 'SECURITY_ALERT', 'KYC_REMINDER'].includes(n.type),
+  },
+];
+
+function iconForType(type: string): { icon: LucideIcon; tone: 'success' | 'danger' | 'warning' | 'brand' | 'neutral' } {
   switch (type) {
     case 'TRANSFER_RECEIVED':
-      return ArrowDownCircle;
-    case 'TRANSFER_SENT':
-      return ArrowUpCircle;
     case 'DEPOSIT_SUCCESS':
-      return CheckCircle2;
+      return { icon: ArrowDownLeft, tone: 'success' };
+    case 'TRANSFER_SENT':
+      return { icon: ArrowUpRight, tone: 'brand' };
     case 'SECURITY_ALERT':
-      return Shield;
+      return { icon: Shield, tone: 'danger' };
     case 'KYC_REMINDER':
-      return UserIcon;
+      return { icon: UserIcon, tone: 'warning' };
     default:
-      return Bell;
+      return { icon: CheckCircle2, tone: 'neutral' };
   }
 }
 
-function colorForType(type: string): string {
-  switch (type) {
-    case 'TRANSFER_RECEIVED':
-    case 'TRANSFER_SENT':
-    case 'DEPOSIT_SUCCESS':
-      return '#3b82f6';
-    case 'SECURITY_ALERT':
-      return '#ef4444';
-    case 'KYC_REMINDER':
-      return '#f59e0b';
-    default:
-      return '#64748b';
-  }
+function formatGroup(iso: string): string {
+  const d = new Date(iso);
+  const now = new Date();
+  const sameDay = d.toDateString() === now.toDateString();
+  if (sameDay) return "Aujourd'hui";
+  const y = new Date(now);
+  y.setDate(now.getDate() - 1);
+  if (d.toDateString() === y.toDateString()) return 'Hier';
+  const diff = Math.floor((now.getTime() - d.getTime()) / 86400000);
+  if (diff < 7) return 'Cette semaine';
+  if (diff < 30) return 'Ce mois-ci';
+  return 'Plus ancien';
 }
 
-function formatDate(dateString: string) {
-  const date = new Date(dateString);
-  const diff = Date.now() - date.getTime();
-  const minutes = Math.floor(diff / 60000);
-  const hours = Math.floor(diff / 3600000);
-  const days = Math.floor(diff / 86400000);
-  if (minutes < 1) return "À l'instant";
-  if (minutes < 60) return `Il y a ${minutes} min`;
-  if (hours < 24) return `Il y a ${hours} h`;
-  if (days === 1) return 'Hier';
-  if (days < 7) return `Il y a ${days} jours`;
-  return date.toLocaleDateString('fr-FR');
+function formatTime(iso: string) {
+  return new Date(iso).toLocaleTimeString('fr-FR', {
+    hour: '2-digit',
+    minute: '2-digit',
+  });
 }
 
 export default function Notifications() {
   const navigate = useNavigate();
-  const colors = useColors();
-  const [notifications, setNotifications] = useState<Notification[]>([]);
+  const { refreshUnreadCount } = useSocket();
+  const [items, setItems] = useState<Notification[]>([]);
   const [loading, setLoading] = useState(true);
-  const [loadingMore, setLoadingMore] = useState(false);
-  const [page, setPage] = useState(1);
-  const [hasMore, setHasMore] = useState(true);
-  const [total, setTotal] = useState(0);
+  const [category, setCategory] = useState<Category>('all');
 
-  useEffect(() => {
-    void loadNotifications(true);
-  }, []);
-
-  const loadNotifications = async (reset = false) => {
+  const load = useCallback(async () => {
     try {
-      if (reset) {
-        setLoading(true);
-        setPage(1);
-      } else {
-        setLoadingMore(true);
-      }
-      const currentPage = reset ? 1 : page;
-      const response = await notificationService.getNotifications(currentPage, PAGE_SIZE);
-      const data: Notification[] = response?.notifications || [];
-      const totalCount: number = response?.total || 0;
-      setTotal(totalCount);
-      setHasMore(
-        data.length === PAGE_SIZE &&
-          notifications.length + data.length < totalCount,
-      );
-      if (reset) {
-        setNotifications(data);
-        setPage(2);
-      } else {
-        setNotifications((prev) => [...prev, ...data]);
-        setPage((p) => p + 1);
-      }
-    } catch (error: any) {
-      console.error('Erreur chargement notifications:', error?.response?.data || error?.message);
-      if (reset) {
-        setNotifications([]);
-        setHasMore(false);
-      }
+      setLoading(true);
+      const r = await notificationService.getNotifications(1, 100);
+      setItems(r?.notifications || []);
+    } catch {
+      setItems([]);
     } finally {
       setLoading(false);
-      setLoadingMore(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    void load();
+  }, [load]);
+
+  const markAllAsRead = async () => {
+    try {
+      await notificationService.markAllAsRead();
+      setItems((prev) => prev.map((n) => ({ ...n, isRead: true })));
+      void refreshUnreadCount();
+    } catch {
+      alert('Échec du marquage');
     }
   };
 
   const markAsRead = async (id: string) => {
     try {
       await notificationService.markAsRead(id);
-      setNotifications((prev) =>
-        prev.map((n) => (n.id === id ? { ...n, isRead: true } : n)),
-      );
-    } catch (e) {
-      console.error('Erreur marquage lu:', e);
-    }
-  };
-
-  const markAllAsRead = async () => {
-    try {
-      await notificationService.markAllAsRead();
-      setNotifications((prev) => prev.map((n) => ({ ...n, isRead: true })));
-    } catch (e) {
-      console.error('Erreur marquage tout lu:', e);
+      setItems((prev) => prev.map((n) => (n.id === id ? { ...n, isRead: true } : n)));
+      void refreshUnreadCount();
+    } catch {
+      /* */
     }
   };
 
@@ -152,117 +146,181 @@ export default function Notifications() {
     else if (n.actionType === 'SECURITY') navigate('/security');
   };
 
-  const unreadCount = notifications.filter((n) => !n.isRead).length;
+  // Stats per category
+  const stats = useMemo(() => {
+    const s: Record<Category, number> = {
+      all: items.length,
+      unread: 0,
+      transfers: 0,
+      security: 0,
+      system: 0,
+    };
+    for (const n of items) {
+      if (!n.isRead) s.unread++;
+      for (const c of CATEGORIES) {
+        if (c.id === 'all' || c.id === 'unread') continue;
+        if (c.match(n)) s[c.id]++;
+      }
+    }
+    return s;
+  }, [items]);
+
+  // Filtered
+  const filtered = useMemo(() => {
+    const cat = CATEGORIES.find((c) => c.id === category)!;
+    return items.filter(cat.match);
+  }, [items, category]);
+
+  // Grouped by date
+  const grouped = useMemo(() => {
+    const groups: { label: string; items: Notification[] }[] = [];
+    for (const n of filtered) {
+      const label = formatGroup(n.createdAt);
+      const g = groups.find((x) => x.label === label);
+      if (g) g.items.push(n);
+      else groups.push({ label, items: [n] });
+    }
+    return groups;
+  }, [filtered]);
+
+  const unreadCount = stats.unread;
 
   return (
-    <div className="min-h-screen bg-bg pb-8">
-      <div className="max-w-3xl mx-auto">
-        <GradientHeader
-          title="Notifications"
-          subtitle={total > 0 ? `${total} notification${total > 1 ? 's' : ''}` : undefined}
-          RightIcon={unreadCount > 0 ? CheckCheck : undefined}
-          onRightPress={unreadCount > 0 ? markAllAsRead : undefined}
-        />
+    <div className="space-y-6 animate-fade-in">
+      <PageHeader
+        title="Notifications"
+        subtitle={
+          unreadCount > 0
+            ? `${unreadCount} non lue${unreadCount > 1 ? 's' : ''}`
+            : 'Tout est à jour'
+        }
+        actions={
+          <>
+            <Button variant="secondary" size="sm" icon={RefreshCcw} onClick={load} />
+            {unreadCount > 0 && (
+              <Button
+                variant="primary"
+                size="sm"
+                icon={CheckCheck}
+                onClick={markAllAsRead}
+              >
+                Tout marquer lu
+              </Button>
+            )}
+          </>
+        }
+      />
 
-        <div className="px-5 mt-4">
-          {unreadCount > 0 && (
-            <div
-              className="flex items-center gap-2 p-3 rounded-xl mb-4"
-              style={{ background: `${colors.primary}15` }}
-            >
-              <Bell size={18} style={{ color: colors.primary }} />
-              <span className="text-sm font-medium" style={{ color: colors.primary }}>
-                {unreadCount} notification{unreadCount > 1 ? 's' : ''} non lue
-                {unreadCount > 1 ? 's' : ''}
-              </span>
-            </div>
-          )}
-
-          {loading ? (
-            <div className="flex items-center justify-center py-16">
-              <Loader2 className="animate-spin" size={32} style={{ color: colors.primary }} />
-            </div>
-          ) : notifications.length === 0 ? (
-            <div className="flex flex-col items-center justify-center py-20 gap-3">
-              <BellOff size={64} style={{ color: colors.textSecondary }} />
-              <div className="text-base" style={{ color: colors.textSecondary }}>
-                Aucune notification
-              </div>
-            </div>
-          ) : (
-            <>
-              <div className="flex flex-col gap-2.5">
-                {notifications.map((n) => {
-                  const Icon = iconForType(n.type);
-                  const color = colorForType(n.type);
-                  return (
-                    <button
-                      key={n.id}
-                      onClick={() => handleClick(n)}
-                      className="card flex items-center gap-3 p-3.5 text-left hover:bg-bg-card/70 transition-colors"
-                      style={
-                        !n.isRead
-                          ? {
-                              background: `${colors.primary}10`,
-                              borderLeftWidth: 3,
-                              borderLeftColor: colors.primary,
-                            }
-                          : undefined
-                      }
-                    >
-                      <div
-                        className="w-12 h-12 rounded-full flex items-center justify-center shrink-0"
-                        style={{ background: `${color}20` }}
-                      >
-                        <Icon size={22} style={{ color }} />
-                      </div>
-                      <div className="flex-1 min-w-0">
-                        <div className="text-sm font-semibold text-white truncate">{n.title}</div>
-                        <div
-                          className="text-xs mt-0.5 line-clamp-2"
-                          style={{ color: colors.textSecondary }}
-                        >
-                          {n.message}
-                        </div>
-                        <div
-                          className="text-[11px] mt-1"
-                          style={{ color: colors.textSecondary }}
-                        >
-                          {formatDate(n.createdAt)}
-                        </div>
-                      </div>
-                      {!n.isRead && (
-                        <div
-                          className="w-2 h-2 rounded-full shrink-0"
-                          style={{ background: colors.primary }}
-                        />
-                      )}
-                    </button>
-                  );
-                })}
-              </div>
-
-              {hasMore && (
+      <div className="grid grid-cols-1 lg:grid-cols-4 gap-5">
+        {/* === Sidebar categories === */}
+        <Card padding="md" className="lg:col-span-1 lg:sticky lg:top-20 lg:self-start">
+          <h3 className="section-title mb-3">Catégories</h3>
+          <nav className="space-y-1">
+            {CATEGORIES.map((c) => {
+              const active = category === c.id;
+              const count = stats[c.id];
+              return (
                 <button
-                  onClick={() => loadNotifications(false)}
-                  disabled={loadingMore}
-                  className="w-full mt-4 py-3 rounded-xl text-sm font-semibold flex items-center justify-center gap-2"
-                  style={{
-                    background: `${colors.primary}15`,
-                    color: colors.primary,
-                  }}
+                  key={c.id}
+                  onClick={() => setCategory(c.id)}
+                  className={`w-full flex items-center justify-between px-3 py-2 rounded-xl text-sm font-medium transition-colors ${
+                    active
+                      ? 'bg-gradient-brand-soft text-ink border border-brand-500/30'
+                      : 'text-ink-muted hover:text-ink hover:bg-bg-subtle border border-transparent'
+                  }`}
                 >
-                  {loadingMore ? (
-                    <>
-                      <Loader2 className="animate-spin" size={16} />
-                      Chargement...
-                    </>
-                  ) : (
-                    'Charger plus'
+                  <span>{c.label}</span>
+                  {count > 0 && (
+                    <span
+                      className={`text-[11px] font-bold px-1.5 py-0.5 rounded-md ${
+                        active
+                          ? 'bg-brand-500 text-white'
+                          : 'bg-bg-elevated text-ink-muted'
+                      }`}
+                    >
+                      {count}
+                    </span>
                   )}
                 </button>
-              )}
-            </>
+              );
+            })}
+          </nav>
+        </Card>
+
+        {/* === Main list === */}
+        <div className="lg:col-span-3">
+          {loading ? (
+            <div className="space-y-3">
+              {[...Array(5)].map((_, i) => (
+                <Skeleton key={i} className="h-20 w-full rounded-2xl" />
+              ))}
+            </div>
+          ) : filtered.length === 0 ? (
+            <Card padding="lg">
+              <Empty
+                icon={BellOff}
+                title={
+                  category === 'all'
+                    ? 'Aucune notification'
+                    : `Aucune notification dans "${CATEGORIES.find((c) => c.id === category)?.label}"`
+                }
+                description="Vos notifications apparaîtront ici dès qu'il y aura quelque chose à signaler"
+                className="py-16"
+              />
+            </Card>
+          ) : (
+            <div className="space-y-6">
+              {grouped.map((g) => (
+                <section key={g.label}>
+                  <h3 className="section-title mb-2 px-1">{g.label}</h3>
+                  <div className="space-y-2">
+                    {g.items.map((n) => {
+                      const { icon: Icon, tone } = iconForType(n.type);
+                      const TONE_BG = {
+                        success: 'bg-success-bg text-success-400',
+                        danger: 'bg-danger-bg text-danger-400',
+                        warning: 'bg-warning-bg text-warning-400',
+                        brand: 'bg-brand-500/15 text-brand-300',
+                        neutral: 'bg-bg-elevated text-ink-muted',
+                      }[tone];
+                      return (
+                        <button
+                          key={n.id}
+                          onClick={() => handleClick(n)}
+                          className={`w-full text-left card-interactive p-4 flex items-start gap-3 relative ${
+                            !n.isRead
+                              ? 'bg-brand-500/5 border-l-2 border-l-brand-500'
+                              : ''
+                          }`}
+                        >
+                          <div
+                            className={`w-11 h-11 rounded-2xl flex items-center justify-center shrink-0 ${TONE_BG}`}
+                          >
+                            <Icon size={18} />
+                          </div>
+                          <div className="flex-1 min-w-0">
+                            <div className="flex items-center justify-between gap-2 mb-1">
+                              <div className="text-sm font-semibold text-ink truncate">
+                                {n.title}
+                              </div>
+                              <div className="text-[11px] text-ink-dim shrink-0">
+                                {formatTime(n.createdAt)}
+                              </div>
+                            </div>
+                            <div className="text-xs text-ink-muted line-clamp-2">
+                              {n.message}
+                            </div>
+                          </div>
+                          {!n.isRead && (
+                            <span className="absolute top-3 right-3 w-2 h-2 rounded-full bg-brand-500" />
+                          )}
+                        </button>
+                      );
+                    })}
+                  </div>
+                </section>
+              ))}
+            </div>
           )}
         </div>
       </div>

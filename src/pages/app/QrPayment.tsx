@@ -1,31 +1,34 @@
 import { Scanner, type IDetectedBarcode } from '@yudiel/react-qr-scanner';
 import {
   AlertCircle,
-  ArrowLeft,
+  ArrowDownLeft,
+  ArrowUpRight,
   Camera,
   CheckCircle2,
   Copy,
   Download,
-  Loader2,
+  Mail,
+  Phone,
   QrCode as QrCodeIcon,
   RotateCcw,
   Scan,
   Send,
   Share2,
+  Shield,
+  Sparkles,
   Wallet,
 } from 'lucide-react';
 import { QRCodeCanvas } from 'qrcode.react';
 import { useEffect, useMemo, useRef, useState } from 'react';
-import GradientHeader from '../../components/GradientHeader';
 import { useAuth } from '../../contexts/AuthContext';
 import { useLocale } from '../../contexts/LocaleContext';
-import { useColors } from '../../contexts/ThemeContext';
 import { useWallet } from '../../contexts/WalletContext';
 import { transactionService } from '../../services/api';
+import { Avatar, Button, Card, PageHeader } from '../../ui';
 
 type Mode = 'scan' | 'mine';
 
-interface ScannedData {
+interface Scanned {
   type?: string;
   name?: string;
   email?: string;
@@ -34,20 +37,18 @@ interface ScannedData {
 }
 
 export default function QrPayment() {
-  const colors = useColors();
   const { user } = useAuth();
   const { balance, fetchBalance } = useWallet();
   const { formatCurrency } = useLocale();
 
   const [mode, setMode] = useState<Mode>('scan');
   const [scanning, setScanning] = useState(true);
-  const [scannedData, setScannedData] = useState<ScannedData | null>(null);
+  const [scanned, setScanned] = useState<Scanned | null>(null);
   const [amount, setAmount] = useState('');
   const [paying, setPaying] = useState(false);
-  const [recent, setRecent] = useState<any[]>([]);
-  const [loadingTx, setLoadingTx] = useState(true);
-  const [success, setSuccess] = useState<{ amount: number; to: string } | null>(null);
+  const [success, setSuccess] = useState<{ amt: number; to: string } | null>(null);
   const [cameraError, setCameraError] = useState<string | null>(null);
+  const [recent, setRecent] = useState<any[]>([]);
 
   const qrRef = useRef<HTMLDivElement | null>(null);
 
@@ -73,74 +74,61 @@ export default function QrPayment() {
 
   const loadRecent = async () => {
     try {
-      setLoadingTx(true);
-      const res = await transactionService.getTransactions({ limit: 5 });
-      const list = res?.transactions || res || [];
-      setRecent(Array.isArray(list) ? list : []);
-    } catch (e: any) {
-      console.error('Erreur transactions:', e?.response?.data || e?.message);
+      const r = await transactionService.getTransactions({ limit: 6 });
+      setRecent(r?.transactions || []);
+    } catch {
       setRecent([]);
-    } finally {
-      setLoadingTx(false);
     }
   };
 
   const handleScan = (detected: IDetectedBarcode[]) => {
-    if (!detected || detected.length === 0 || !scanning) return;
+    if (!detected.length || !scanning) return;
     const raw = detected[0].rawValue;
     setScanning(false);
     try {
-      const parsed = JSON.parse(raw) as ScannedData;
+      const parsed = JSON.parse(raw) as Scanned;
       if (parsed.type === 'payment_request' && (parsed.email || parsed.telephone)) {
-        setScannedData(parsed);
+        setScanned(parsed);
         if (parsed.amount) setAmount(String(parsed.amount));
         return;
       }
-      throw new Error('Invalid QR');
+      throw new Error();
     } catch {
       if (raw.includes('@')) {
-        setScannedData({ email: raw, name: raw.split('@')[0] });
+        setScanned({ email: raw, name: raw.split('@')[0] });
       } else {
-        alert("Ce QR n'est pas un code de paiement M'Paye valide");
+        alert('QR non reconnu comme un code de paiement M\'Paye');
         setScanning(true);
       }
     }
   };
 
-  const resetScan = () => {
-    setScannedData(null);
+  const reset = () => {
+    setScanned(null);
     setAmount('');
     setScanning(true);
   };
 
-  const handlePay = async () => {
-    if (!scannedData) return;
+  const pay = async () => {
+    if (!scanned) return;
     const amt = parseFloat(amount);
-    if (!amt || amt <= 0) {
-      alert('Veuillez entrer un montant valide');
-      return;
-    }
-    if (amt > balance) {
-      alert(`Solde insuffisant (${formatCurrency(balance)} disponible)`);
-      return;
-    }
-    const identifier = scannedData.email || scannedData.telephone;
-    if (!identifier) {
-      alert('Informations du destinataire manquantes');
-      return;
-    }
+    if (!amt || amt <= 0) return alert('Montant invalide');
+    if (amt > balance) return alert(`Solde insuffisant (${formatCurrency(balance)})`);
+    const identifier = scanned.email || scanned.telephone;
+    if (!identifier) return alert('Destinataire incomplet');
     setPaying(true);
     try {
       await transactionService.transfer({
         toPhone: identifier,
         amount: amt,
-        motif: 'Transfert QR code',
+        motif: 'Paiement QR',
       });
-      await Promise.all([fetchBalance(), loadRecent()]);
-      setSuccess({ amount: amt, to: scannedData.name || identifier });
+      await fetchBalance();
+      await loadRecent();
+      setSuccess({ amt, to: scanned.name || identifier });
       setTimeout(() => {
         setSuccess(null);
-        resetScan();
+        reset();
       }, 2500);
     } catch (e: any) {
       alert(e?.response?.data?.message || 'Paiement échoué');
@@ -149,12 +137,12 @@ export default function QrPayment() {
     }
   };
 
-  const getQRCanvas = (): HTMLCanvasElement | null => {
-    return qrRef.current?.querySelector('canvas') || null;
-  };
+  // QR actions for "mine"
+  const getCanvas = (): HTMLCanvasElement | null =>
+    qrRef.current?.querySelector('canvas') || null;
 
   const downloadMyQR = () => {
-    const canvas = getQRCanvas();
+    const canvas = getCanvas();
     if (!canvas) return;
     const link = document.createElement('a');
     link.href = canvas.toDataURL('image/png');
@@ -163,11 +151,11 @@ export default function QrPayment() {
   };
 
   const shareMyQR = async () => {
-    const canvas = getQRCanvas();
+    const canvas = getCanvas();
     if (!canvas) return;
     try {
-      const blob: Blob | null = await new Promise((resolve) =>
-        canvas.toBlob((b) => resolve(b), 'image/png'),
+      const blob: Blob | null = await new Promise((res) =>
+        canvas.toBlob((b) => res(b), 'image/png'),
       );
       if (!blob) return;
       const file = new File([blob], 'qr-mpaye.png', { type: 'image/png' });
@@ -177,326 +165,345 @@ export default function QrPayment() {
         downloadMyQR();
       }
     } catch {
-      /* annulé */
+      /* */
     }
   };
 
-  const copyMyContact = async () => {
+  const copyContact = async () => {
     try {
       await navigator.clipboard.writeText(user?.email || user?.telephone || '');
       alert('Contact copié');
     } catch {
-      /* indisponible */
+      /* */
     }
   };
 
   return (
-    <div className="min-h-screen bg-bg pb-8">
-      <div className="max-w-3xl mx-auto">
-        <GradientHeader title="Paiement QR" subtitle={`Solde : ${formatCurrency(balance)}`} />
-
-        <div className="px-5 mt-4 space-y-4">
-          {/* Mode toggle */}
-          <div className="card flex gap-1 p-1">
-            <button
-              onClick={() => {
-                setMode('scan');
-                resetScan();
-              }}
-              className="flex-1 flex items-center justify-center gap-2 py-2.5 rounded-xl font-semibold text-sm transition-all"
-              style={{
-                background: mode === 'scan' ? colors.primary : 'transparent',
-                color: mode === 'scan' ? '#fff' : colors.textSecondary,
-              }}
-            >
-              <Scan size={16} />
-              Scanner pour payer
-            </button>
-            <button
-              onClick={() => setMode('mine')}
-              className="flex-1 flex items-center justify-center gap-2 py-2.5 rounded-xl font-semibold text-sm transition-all"
-              style={{
-                background: mode === 'mine' ? colors.primary : 'transparent',
-                color: mode === 'mine' ? '#fff' : colors.textSecondary,
-              }}
-            >
-              <QrCodeIcon size={16} />
-              Mon QR
-            </button>
+    <div className="space-y-6 animate-fade-in">
+      <PageHeader
+        title="Paiement par QR"
+        subtitle="Scannez pour payer, ou faites scanner votre QR pour recevoir"
+        actions={
+          <div className="flex gap-1 p-1 bg-bg-elevated rounded-xl">
+            {[
+              { id: 'scan' as Mode, label: 'Scanner', icon: Scan },
+              { id: 'mine' as Mode, label: 'Mon QR', icon: QrCodeIcon },
+            ].map((t) => {
+              const Icon = t.icon;
+              const active = mode === t.id;
+              return (
+                <button
+                  key={t.id}
+                  onClick={() => {
+                    setMode(t.id);
+                    reset();
+                  }}
+                  className={`flex items-center gap-2 px-3.5 py-1.5 rounded-lg text-xs font-semibold transition-all ${
+                    active
+                      ? 'bg-gradient-brand text-white shadow-glow-soft'
+                      : 'text-ink-muted hover:text-ink'
+                  }`}
+                >
+                  <Icon size={13} />
+                  {t.label}
+                </button>
+              );
+            })}
           </div>
+        }
+      />
 
-          {/* Mode SCAN */}
-          {mode === 'scan' && (
-            <>
-              {!scannedData ? (
-                <div className="card p-4">
-                  <div className="text-sm font-semibold mb-3 flex items-center gap-2" style={{ color: colors.text }}>
-                    <Camera size={18} style={{ color: colors.primary }} />
-                    Pointez la caméra vers un QR M'Paye
-                  </div>
-                  <div className="relative rounded-2xl overflow-hidden bg-black aspect-square max-w-md mx-auto">
-                    {cameraError ? (
-                      <div className="absolute inset-0 flex flex-col items-center justify-center gap-3 p-6 text-center text-white">
-                        <AlertCircle size={48} className="text-red-400" />
-                        <div className="text-sm">{cameraError}</div>
-                        <button
-                          onClick={() => setCameraError(null)}
-                          className="px-4 py-2 rounded-lg bg-white/15 text-sm font-semibold"
-                        >
-                          Réessayer
-                        </button>
-                      </div>
-                    ) : (
-                      <>
-                        <Scanner
-                          onScan={handleScan}
-                          onError={(err: any) =>
-                            setCameraError(
-                              err?.message ||
-                                "Accès caméra refusé. Autorisez la caméra dans les paramètres du navigateur.",
-                            )
-                          }
-                          formats={['qr_code']}
-                          sound={false}
-                          components={{
-                            finder: true,
-                            torch: true,
-                            zoom: true,
-                          }}
-                          styles={{
-                            container: { width: '100%', height: '100%' },
-                            video: { objectFit: 'cover' as const },
-                          }}
-                        />
-                        {/* Overlay viseur */}
-                        <div className="pointer-events-none absolute inset-0 flex items-center justify-center">
-                          <div className="w-60 h-60 border-2 border-white/70 rounded-2xl relative">
-                            <div className="absolute -top-1 -left-1 w-6 h-6 border-t-4 border-l-4 border-primary-light rounded-tl-2xl" />
-                            <div className="absolute -top-1 -right-1 w-6 h-6 border-t-4 border-r-4 border-primary-light rounded-tr-2xl" />
-                            <div className="absolute -bottom-1 -left-1 w-6 h-6 border-b-4 border-l-4 border-primary-light rounded-bl-2xl" />
-                            <div className="absolute -bottom-1 -right-1 w-6 h-6 border-b-4 border-r-4 border-primary-light rounded-br-2xl" />
-                          </div>
-                        </div>
-                      </>
-                    )}
-                  </div>
+      <div className="grid grid-cols-1 lg:grid-cols-3 gap-5">
+        {/* Main pane */}
+        <div className="lg:col-span-2 space-y-5">
+          {mode === 'scan' ? (
+            !scanned ? (
+              <Card padding="md">
+                <div className="flex items-center gap-2 mb-3">
+                  <Camera size={18} className="text-brand-300" />
+                  <h3 className="text-base font-bold">Pointez la caméra vers un QR M'Paye</h3>
                 </div>
-              ) : (
-                /* Formulaire de paiement */
-                <div className="card p-5 space-y-4">
-                  <div className="flex items-center justify-between">
-                    <div className="flex items-center gap-3 min-w-0">
-                      <div
-                        className="w-12 h-12 rounded-full flex items-center justify-center shrink-0 text-white text-lg font-bold"
-                        style={{ background: colors.primary }}
+                <div className="relative aspect-square sm:aspect-video w-full rounded-2xl overflow-hidden bg-black max-w-2xl mx-auto">
+                  {cameraError ? (
+                    <div className="absolute inset-0 flex flex-col items-center justify-center gap-3 p-6 text-center text-white">
+                      <AlertCircle size={48} className="text-danger-400" />
+                      <div className="text-sm">{cameraError}</div>
+                      <Button
+                        variant="secondary"
+                        size="sm"
+                        onClick={() => setCameraError(null)}
                       >
-                        {(scannedData.name?.[0] || scannedData.email?.[0] || '?').toUpperCase()}
-                      </div>
-                      <div className="min-w-0">
-                        <div className="text-sm font-bold truncate" style={{ color: colors.text }}>
-                          {scannedData.name || 'Destinataire'}
-                        </div>
-                        <div className="text-xs truncate" style={{ color: colors.textSecondary }}>
-                          {scannedData.email || scannedData.telephone}
-                        </div>
-                      </div>
+                        Réessayer
+                      </Button>
                     </div>
-                    <button
-                      onClick={resetScan}
-                      className="w-9 h-9 rounded-lg flex items-center justify-center"
-                      style={{ background: `${colors.textSecondary}20`, color: colors.text }}
-                      title="Scanner un autre QR"
-                    >
-                      <RotateCcw size={16} />
-                    </button>
-                  </div>
-
-                  <div>
-                    <label
-                      className="text-xs font-semibold mb-1.5 block"
-                      style={{ color: colors.textSecondary }}
-                    >
-                      Montant à payer (Ar)
-                    </label>
-                    <div
-                      className="flex items-center gap-2 px-3 py-2.5 rounded-xl border"
-                      style={{ borderColor: colors.border, background: colors.background }}
-                    >
-                      <Wallet size={20} style={{ color: colors.textSecondary }} />
-                      <input
-                        autoFocus
-                        type="text"
-                        inputMode="numeric"
-                        className="flex-1 bg-transparent outline-none text-xl font-bold"
-                        style={{ color: colors.text }}
-                        value={amount}
-                        onChange={(e) => setAmount(e.target.value.replace(/[^\d.]/g, ''))}
-                        placeholder="0"
+                  ) : (
+                    <>
+                      <Scanner
+                        onScan={handleScan}
+                        onError={(err: any) =>
+                          setCameraError(
+                            err?.message ||
+                              "Accès caméra refusé. Autorisez la caméra dans les paramètres du navigateur.",
+                          )
+                        }
+                        formats={['qr_code']}
+                        sound={false}
+                        components={{ finder: true, torch: true, zoom: true }}
+                        styles={{
+                          container: { width: '100%', height: '100%' },
+                          video: { objectFit: 'cover' as const },
+                        }}
                       />
+                      <div className="pointer-events-none absolute inset-0 flex items-center justify-center">
+                        <div className="w-56 h-56 sm:w-64 sm:h-64 border-2 border-white/40 rounded-3xl relative">
+                          <Corner pos="tl" />
+                          <Corner pos="tr" />
+                          <Corner pos="bl" />
+                          <Corner pos="br" />
+                        </div>
+                      </div>
+                    </>
+                  )}
+                </div>
+                <p className="text-xs text-ink-muted mt-3 text-center">
+                  La caméra démarrera après autorisation. Visez le QR du marchand ou d'un utilisateur.
+                </p>
+              </Card>
+            ) : (
+              <Card padding="md">
+                <div className="flex items-center justify-between mb-5">
+                  <h3 className="text-base font-bold">Confirmer le paiement</h3>
+                  <Button variant="ghost" size="sm" icon={RotateCcw} onClick={reset}>
+                    Scanner autre
+                  </Button>
+                </div>
+
+                <div className="flex items-center gap-3 p-4 rounded-xl bg-bg-elevated mb-5">
+                  <Avatar name={scanned.name || scanned.email} size="lg" />
+                  <div className="min-w-0">
+                    <div className="text-xs text-ink-muted">Destinataire</div>
+                    <div className="text-base font-bold truncate">
+                      {scanned.name || 'Bénéficiaire'}
+                    </div>
+                    <div className="text-xs text-ink-muted truncate flex items-center gap-1.5 mt-0.5">
+                      {scanned.email ? <Mail size={11} /> : <Phone size={11} />}
+                      {scanned.email || scanned.telephone}
                     </div>
                   </div>
-
-                  <button
-                    onClick={handlePay}
-                    disabled={paying || !amount || parseFloat(amount) <= 0}
-                    className="w-full flex items-center justify-center gap-2 py-3.5 rounded-xl font-bold text-white"
-                    style={{
-                      background:
-                        amount && parseFloat(amount) > 0 ? colors.primary : '#475569',
-                      opacity: paying ? 0.7 : 1,
-                    }}
-                  >
-                    {paying ? (
-                      <Loader2 className="animate-spin" size={20} />
-                    ) : (
-                      <>
-                        <Send size={18} />
-                        Payer {amount ? `${parseFloat(amount).toLocaleString('fr-FR')} Ar` : ''}
-                      </>
-                    )}
-                  </button>
-
-                  <button
-                    onClick={resetScan}
-                    className="w-full flex items-center justify-center gap-2 py-2 text-sm font-semibold"
-                    style={{ color: colors.textSecondary }}
-                  >
-                    <ArrowLeft size={14} />
-                    Annuler et scanner un autre code
-                  </button>
                 </div>
-              )}
-            </>
-          )}
 
-          {/* Mode MINE */}
-          {mode === 'mine' && (
-            <div
-              className="rounded-2xl p-6 text-center text-white"
-              style={{ background: 'linear-gradient(135deg, #0f172a 0%, #1e40af 100%)' }}
-            >
-              <div className="text-sm font-semibold mb-1">
-                {user?.prenom ? `${user.prenom} ${user.nom || ''}`.trim() : 'Mon QR'}
-              </div>
-              <div className="text-xs opacity-80 mb-5">{user?.email}</div>
-              <div ref={qrRef} className="inline-block bg-white p-4 rounded-2xl">
-                <QRCodeCanvas value={qrData} size={220} level="H" />
-              </div>
-              <div className="text-xs opacity-80 mt-4">
-                Faites scanner ce QR pour être payé
-              </div>
-              <div className="flex gap-2 mt-5 max-w-sm mx-auto">
-                <button
-                  onClick={shareMyQR}
-                  className="flex-1 flex items-center justify-center gap-1.5 py-2 rounded-xl bg-white/20 hover:bg-white/30 text-sm font-semibold"
+                <div>
+                  <label className="label">Montant à payer</label>
+                  <div className="relative">
+                    <input
+                      type="text"
+                      inputMode="numeric"
+                      autoFocus
+                      value={amount}
+                      onChange={(e) => setAmount(e.target.value.replace(/[^\d.]/g, ''))}
+                      placeholder="0"
+                      className="input text-3xl font-bold py-4 pr-16"
+                    />
+                    <span className="absolute right-4 top-1/2 -translate-y-1/2 text-ink-dim text-base font-semibold">
+                      Ar
+                    </span>
+                  </div>
+                  <div className="flex justify-between text-xs mt-2">
+                    <span className="text-ink-dim">
+                      Solde : {formatCurrency(balance)}
+                    </span>
+                    {amount && parseFloat(amount) > balance && (
+                      <span className="text-danger-400 font-semibold">Insuffisant</span>
+                    )}
+                  </div>
+
+                  <div className="flex gap-2 mt-3 flex-wrap">
+                    {[5000, 10000, 25000, 50000].map((p) => (
+                      <button
+                        key={p}
+                        onClick={() => setAmount(String(p))}
+                        className="px-3 py-1.5 text-xs font-semibold rounded-lg bg-bg-elevated border border-bg-border hover:border-brand-500/50 hover:text-brand-300"
+                      >
+                        {p.toLocaleString('fr-FR')} Ar
+                      </button>
+                    ))}
+                  </div>
+                </div>
+
+                <Button
+                  variant="primary"
+                  size="lg"
+                  fullWidth
+                  loading={paying}
+                  disabled={!amount || parseFloat(amount) <= 0 || parseFloat(amount) > balance}
+                  icon={Send}
+                  className="mt-5"
+                  onClick={pay}
                 >
-                  <Share2 size={16} />
+                  Payer
+                  {amount && parseFloat(amount) > 0 && (
+                    <span className="ml-1 opacity-80">
+                      · {parseFloat(amount).toLocaleString('fr-FR')} Ar
+                    </span>
+                  )}
+                </Button>
+              </Card>
+            )
+          ) : (
+            /* === Mon QR === */
+            <Card padding="lg" className="text-center">
+              <div className="inline-flex items-center gap-1 px-3 py-1 rounded-full bg-brand-500/15 text-brand-300 text-[10px] font-bold uppercase tracking-wider mb-4">
+                <Sparkles size={11} />
+                Mon code
+              </div>
+
+              <div className="flex items-center justify-center gap-2 mb-1">
+                <Avatar name={`${user?.prenom || ''} ${user?.nom || ''}`.trim() || user?.email} size="sm" />
+                <div className="text-base font-bold">
+                  {user?.prenom ? `${user.prenom} ${user.nom || ''}`.trim() : "Mon profil"}
+                </div>
+              </div>
+              <div className="text-xs text-ink-muted mb-6">{user?.email}</div>
+
+              <div ref={qrRef} className="inline-block bg-white p-5 rounded-3xl shadow-elevated">
+                <QRCodeCanvas value={qrData} size={240} level="H" />
+              </div>
+
+              <div className="text-xs text-ink-muted mt-5 max-w-xs mx-auto">
+                Faites scanner ce QR pour recevoir un paiement instantané, gratuit et sécurisé.
+              </div>
+
+              <div className="flex flex-wrap gap-2 justify-center mt-5">
+                <Button variant="primary" size="md" icon={Share2} onClick={shareMyQR}>
                   Partager
-                </button>
-                <button
-                  onClick={downloadMyQR}
-                  className="flex-1 flex items-center justify-center gap-1.5 py-2 rounded-xl bg-white/20 hover:bg-white/30 text-sm font-semibold"
-                >
-                  <Download size={16} />
+                </Button>
+                <Button variant="secondary" size="md" icon={Download} onClick={downloadMyQR}>
                   Télécharger
-                </button>
-                <button
-                  onClick={copyMyContact}
-                  className="flex items-center justify-center px-3 py-2 rounded-xl bg-white/20 hover:bg-white/30"
-                >
-                  <Copy size={16} />
-                </button>
+                </Button>
+                <Button variant="ghost" size="md" icon={Copy} onClick={copyContact}>
+                  Copier contact
+                </Button>
               </div>
-            </div>
+            </Card>
           )}
+        </div>
 
-          {/* Transactions récentes */}
-          <section>
-            <h3 className="text-sm font-bold mb-3" style={{ color: colors.text }}>
-              Transactions récentes
-            </h3>
-            {loadingTx ? (
-              <div className="flex justify-center py-6">
-                <Loader2 className="animate-spin" size={24} style={{ color: colors.primary }} />
-              </div>
-            ) : recent.length === 0 ? (
-              <div className="card p-6 text-center text-sm" style={{ color: colors.textSecondary }}>
-                Aucune transaction récente
+        {/* Side rail */}
+        <div className="space-y-4">
+          {/* Balance */}
+          <Card padding="md">
+            <div className="flex items-center gap-2 text-ink-muted text-xs font-semibold uppercase tracking-wider mb-2">
+              <Wallet size={12} />
+              Solde
+            </div>
+            <div className="text-2xl font-bold">{formatCurrency(balance)}</div>
+            <div className="text-[11px] text-ink-dim mt-1">Disponible immédiatement</div>
+          </Card>
+
+          {/* Tips */}
+          <Card padding="md">
+            <div className="flex items-center gap-2 mb-3">
+              <Shield size={14} className="text-success-400" />
+              <h3 className="text-sm font-bold">Sécurité & bonnes pratiques</h3>
+            </div>
+            <ul className="space-y-2.5 text-xs text-ink-muted">
+              {[
+                'Vérifiez toujours le nom du destinataire avant de payer.',
+                'M\'Paye ne demandera jamais votre mot de passe via QR.',
+                'Les QR code de paiement ne sont valables que pour des comptes M\'Paye.',
+              ].map((t, i) => (
+                <li key={i} className="flex items-start gap-2">
+                  <CheckCircle2 size={12} className="text-success-400 mt-0.5 shrink-0" />
+                  <span>{t}</span>
+                </li>
+              ))}
+            </ul>
+          </Card>
+
+          {/* Recent */}
+          <Card padding="md">
+            <div className="flex items-center justify-between mb-3">
+              <h3 className="text-sm font-bold">Transactions récentes</h3>
+            </div>
+            {recent.length === 0 ? (
+              <div className="text-xs text-ink-muted text-center py-6">
+                Aucune activité récente
               </div>
             ) : (
-              <div className="space-y-2">
-                {recent.map((tx: any) => {
-                  const isPos = tx.isCredit || tx.type === 'DEPOSIT';
+              <div className="space-y-1">
+                {recent.slice(0, 5).map((t: any) => {
+                  const isPos = t.isCredit || t.type === 'DEPOSIT';
+                  const counterpart =
+                    t.sender?.fullName || t.receiver?.fullName || 'M\'Paye';
                   return (
                     <div
-                      key={tx.id}
-                      className="card flex items-center justify-between p-3"
+                      key={t.id}
+                      className="flex items-center gap-2.5 p-2 rounded-lg hover:bg-bg-elevated"
                     >
-                      <div className="flex items-center gap-3 min-w-0">
-                        <div
-                          className="w-10 h-10 rounded-full flex items-center justify-center shrink-0"
-                          style={{
-                            background: isPos
-                              ? `${colors.success}20`
-                              : `${colors.error}20`,
-                          }}
-                        >
-                          {isPos ? (
-                            <Wallet size={18} style={{ color: colors.success }} />
-                          ) : (
-                            <Send size={18} style={{ color: colors.error }} />
-                          )}
-                        </div>
-                        <div className="min-w-0">
-                          <div className="text-sm font-medium truncate" style={{ color: colors.text }}>
-                            {tx.sender?.fullName ||
-                              tx.receiver?.fullName ||
-                              tx.motif ||
-                              'Transaction'}
-                          </div>
-                          <div className="text-[11px]" style={{ color: colors.textSecondary }}>
-                            {new Date(tx.createdAt).toLocaleString('fr-FR', {
-                              day: '2-digit',
-                              month: 'short',
-                              hour: '2-digit',
-                              minute: '2-digit',
-                            })}
-                          </div>
+                      <div
+                        className={`w-8 h-8 rounded-lg flex items-center justify-center shrink-0 ${
+                          isPos ? 'bg-success-bg text-success-400' : 'bg-bg-elevated text-ink-muted'
+                        }`}
+                      >
+                        {isPos ? (
+                          <ArrowDownLeft size={14} />
+                        ) : (
+                          <ArrowUpRight size={14} />
+                        )}
+                      </div>
+                      <div className="flex-1 min-w-0">
+                        <div className="text-xs font-semibold truncate">{counterpart}</div>
+                        <div className="text-[10px] text-ink-dim">
+                          {new Date(t.createdAt).toLocaleTimeString('fr-FR', {
+                            hour: '2-digit',
+                            minute: '2-digit',
+                          })}
                         </div>
                       </div>
                       <div
-                        className="text-sm font-bold shrink-0"
-                        style={{ color: isPos ? colors.success : colors.error }}
+                        className={`text-xs font-bold shrink-0 ${
+                          isPos ? 'text-success-400' : 'text-ink'
+                        }`}
                       >
-                        {isPos ? '+' : '-'}
-                        {Number(tx.montant).toLocaleString('fr-FR')} Ar
+                        {isPos ? '+' : '−'}
+                        {Number(t.montant).toLocaleString('fr-FR')}
                       </div>
                     </div>
                   );
                 })}
               </div>
             )}
-          </section>
+          </Card>
         </div>
       </div>
 
-      {/* Modal succès */}
+      {/* Success modal */}
       {success && (
-        <div className="fixed inset-0 z-50 bg-black/70 flex items-center justify-center px-6">
-          <div className="bg-bg-card rounded-3xl p-6 flex flex-col items-center gap-3 max-w-sm w-full">
-            <div className="w-20 h-20 rounded-full bg-green-500/20 flex items-center justify-center">
-              <CheckCircle2 size={56} className="text-green-400" />
+        <div className="fixed inset-0 z-50 bg-black/70 backdrop-blur-sm flex items-center justify-center p-4 animate-fade-in">
+          <Card padding="lg" className="max-w-md w-full text-center animate-slide-in">
+            <div className="w-20 h-20 mx-auto rounded-full bg-success-bg flex items-center justify-center mb-4">
+              <CheckCircle2 size={56} className="text-success-400" />
             </div>
-            <div className="text-xl font-bold text-white">Paiement réussi !</div>
-            <div className="text-2xl font-extrabold text-green-400">
-              {success.amount.toLocaleString('fr-FR')} Ar
+            <div className="text-2xl font-bold mb-1">Paiement réussi !</div>
+            <div className="text-3xl font-extrabold text-success-400 mb-2">
+              {success.amt.toLocaleString('fr-FR')} Ar
             </div>
-            <div className="text-sm text-slate-400 text-center">
-              à <span className="text-white font-semibold">{success.to}</span>
+            <div className="text-sm text-ink-muted">
+              à <span className="font-bold text-ink">{success.to}</span>
             </div>
-          </div>
+          </Card>
         </div>
       )}
     </div>
   );
+}
+
+function Corner({ pos }: { pos: 'tl' | 'tr' | 'bl' | 'br' }) {
+  const cls = {
+    tl: '-top-1 -left-1 border-t-4 border-l-4 rounded-tl-3xl',
+    tr: '-top-1 -right-1 border-t-4 border-r-4 rounded-tr-3xl',
+    bl: '-bottom-1 -left-1 border-b-4 border-l-4 rounded-bl-3xl',
+    br: '-bottom-1 -right-1 border-b-4 border-r-4 rounded-br-3xl',
+  }[pos];
+  return <div className={`absolute w-8 h-8 border-brand-300 ${cls}`} />;
 }

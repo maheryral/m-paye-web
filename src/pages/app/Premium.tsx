@@ -1,29 +1,49 @@
 import {
+  ArrowRight,
+  Building2,
   Check,
   Crown,
-  Loader2,
   Sparkles,
   Star,
-  UserCircle2,
+  Zap,
+  type LucideIcon,
 } from 'lucide-react';
 import { useCallback, useEffect, useState } from 'react';
-import GradientHeader from '../../components/GradientHeader';
 import { useLocale } from '../../contexts/LocaleContext';
-import { useColors } from '../../contexts/ThemeContext';
 import { useWallet } from '../../contexts/WalletContext';
 import {
   monetizationApi,
   type Plan,
   type Subscription,
 } from '../../services/monetizationApi';
+import { Badge, Button, Card, PageHeader, Skeleton } from '../../ui';
+
+const PLAN_META: Record<string, { icon: LucideIcon; bgGradient: string; accent: string }> = {
+  BASIC: {
+    icon: Zap,
+    bgGradient: 'from-slate-600 via-slate-700 to-slate-800',
+    accent: '#94A3B8',
+  },
+  PREMIUM: {
+    icon: Crown,
+    bgGradient: 'from-brand-500 via-brand-600 to-brand-700',
+    accent: '#6366F1',
+  },
+  BUSINESS: {
+    icon: Building2,
+    bgGradient: 'from-cyan-500 via-cyan-600 to-blue-700',
+    accent: '#06B6D4',
+  },
+};
 
 export default function Premium() {
-  const colors = useColors();
   const { balance, fetchBalance } = useWallet();
   const { formatCurrency } = useLocale();
+
   const [plans, setPlans] = useState<Plan[]>([]);
   const [current, setCurrent] = useState<Subscription | null>(null);
   const [loading, setLoading] = useState(true);
+  const [billingCycle, setBillingCycle] = useState<'monthly' | 'yearly'>('monthly');
   const [subscribing, setSubscribing] = useState<string | null>(null);
 
   const load = useCallback(async () => {
@@ -34,8 +54,8 @@ export default function Premium() {
       ]);
       setPlans(Array.isArray(p.data) ? p.data : []);
       setCurrent(c.data);
-    } catch (e: any) {
-      console.error('Erreur chargement plans:', e?.response?.data || e?.message);
+    } catch {
+      /* */
     } finally {
       setLoading(false);
     }
@@ -45,200 +65,292 @@ export default function Premium() {
     void load();
   }, [load]);
 
-  const handleSubscribe = async (plan: Plan) => {
+  const subscribe = async (plan: Plan) => {
     if (plan.id === 'BASIC') {
-      alert('BASIC est votre plan par défaut, pas besoin de souscrire.');
+      alert('BASIC est votre plan par défaut');
       return;
     }
     if (balance < plan.price) {
-      alert(
-        `Solde insuffisant : ${formatCurrency(balance)} disponible, ${formatCurrency(plan.price)} requis. Rechargez votre portefeuille.`,
+      return alert(
+        `Solde insuffisant — ${formatCurrency(balance)} disponible, ${formatCurrency(plan.price)} requis`,
       );
-      return;
     }
     if (
       !confirm(
-        `Souscrire au plan ${plan.name} ?\n\n${formatCurrency(plan.price)} seront débités de votre wallet pour 30 jours.`,
+        `Souscrire au plan ${plan.name} ?\n${formatCurrency(plan.price)} débités du wallet pour 30 jours.`,
       )
     )
       return;
-
     setSubscribing(plan.id);
     try {
       await monetizationApi.subscribe(plan.id);
-      alert(`Abonnement ${plan.name} activé !`);
+      alert(`Plan ${plan.name} activé`);
       await Promise.all([load(), fetchBalance()]);
     } catch (e: any) {
-      alert(e?.response?.data?.message || 'Abonnement échoué');
+      alert(e?.response?.data?.message || 'Échec de la souscription');
     } finally {
       setSubscribing(null);
     }
   };
 
-  const handleCancel = async () => {
-    if (
-      !confirm(
-        "Annuler le renouvellement ?\nVous garderez vos avantages jusqu'à la fin de la période.",
-      )
-    )
+  const cancel = async () => {
+    if (!confirm('Annuler le renouvellement ? Vos avantages seront actifs jusqu\'à la fin de la période.'))
       return;
     try {
       await monetizationApi.cancelPlan();
       await load();
     } catch (e: any) {
-      alert(e?.response?.data?.message || 'Annulation échouée');
+      alert(e?.response?.data?.message || 'Échec de l\'annulation');
     }
   };
 
-  if (loading) {
-    return (
-      <div className="min-h-screen bg-bg">
-        <GradientHeader title="Premium" />
-        <div className="flex justify-center mt-20">
-          <Loader2 className="animate-spin" size={32} style={{ color: colors.primary }} />
-        </div>
-      </div>
-    );
-  }
+  const yearlyDiscount = 0.2; // -20% sur le yearly (marketing)
 
   return (
-    <div className="min-h-screen bg-bg pb-8">
-      <div className="max-w-3xl mx-auto">
-        <GradientHeader
-          title="Plans d'abonnement"
-          subtitle="Économisez sur tous vos paiements"
-        />
+    <div className="space-y-6 animate-fade-in">
+      <PageHeader
+        title="Plans & abonnement"
+        subtitle="Économisez sur vos paiements, débloquez des plafonds étendus"
+      />
 
-        <div className="px-5 mt-4 space-y-4">
-          {/* Plan actuel */}
-          <div
-            className="rounded-2xl p-5 text-white shadow-glow-blue overflow-hidden relative"
-            style={{
-              background: 'linear-gradient(135deg, #0f172a 0%, #1e40af 100%)',
-            }}
+      {/* Hero */}
+      <Card gradient padding="lg" className="text-center">
+        <div className="inline-flex items-center gap-1 px-3 py-1 rounded-full bg-white/15 backdrop-blur-sm text-white text-[10px] font-bold uppercase tracking-wider mb-4">
+          <Sparkles size={11} />
+          Choisissez votre plan
+        </div>
+        <h2 className="text-2xl md:text-3xl font-bold text-white tracking-tight">
+          Plus vous utilisez M'Paye,<br />
+          <span className="text-white/80">plus vous économisez.</span>
+        </h2>
+        <p className="text-sm text-white/80 mt-3 max-w-md mx-auto">
+          Cashback étendu, plafonds plus élevés, support prioritaire et avantages exclusifs.
+        </p>
+
+        {/* Billing toggle */}
+        <div className="inline-flex items-center gap-1 p-1 bg-white/15 backdrop-blur-sm rounded-xl mt-6">
+          <button
+            onClick={() => setBillingCycle('monthly')}
+            className={`px-4 py-1.5 rounded-lg text-xs font-semibold transition-all ${
+              billingCycle === 'monthly'
+                ? 'bg-white text-brand-700'
+                : 'text-white/80 hover:text-white'
+            }`}
           >
-            <div className="absolute -top-10 -right-10 w-40 h-40 rounded-full bg-white/[0.07]" />
-            <div className="relative flex items-center gap-3 mb-2">
-              {current?.plan === 'BASIC' || !current?.plan ? (
-                <UserCircle2 size={28} className="text-white" />
-              ) : (
-                <Crown size={28} className="text-yellow-300" />
-              )}
-              <div>
-                <div className="text-xs text-white/80">Votre plan actuel</div>
-                <div className="text-2xl font-extrabold">{current?.plan || 'BASIC'}</div>
-              </div>
-            </div>
-            {current?.endDate && (
-              <div className="relative text-xs text-white/80">
-                Expire le {new Date(current.endDate).toLocaleDateString('fr-FR')}
-              </div>
-            )}
-            {current && current.plan !== 'BASIC' && current.endDate && (
-              <button
-                onClick={handleCancel}
-                className="relative mt-3 text-xs font-semibold underline text-white/90"
-              >
-                Annuler le renouvellement
-              </button>
-            )}
-          </div>
+            Mensuel
+          </button>
+          <button
+            onClick={() => setBillingCycle('yearly')}
+            className={`px-4 py-1.5 rounded-lg text-xs font-semibold flex items-center gap-1.5 transition-all ${
+              billingCycle === 'yearly'
+                ? 'bg-white text-brand-700'
+                : 'text-white/80 hover:text-white'
+            }`}
+          >
+            Annuel
+            <span className="text-[9px] font-bold uppercase px-1.5 py-0.5 rounded bg-success-500 text-white">
+              -20%
+            </span>
+          </button>
+        </div>
+      </Card>
 
-          {/* Liste plans */}
-          <div className="space-y-4">
-            {plans.map((plan) => {
-              const isCurrent = current?.plan === plan.id;
-              const isFree = plan.price === 0;
-              return (
+      {/* Current plan banner */}
+      {current && current.plan !== 'BASIC' && (
+        <Card padding="md" className="border-success-500/30">
+          <div className="flex items-center gap-4">
+            <div className="w-12 h-12 rounded-2xl bg-success-bg flex items-center justify-center text-success-400 shrink-0">
+              <Crown size={20} />
+            </div>
+            <div className="flex-1 min-w-0">
+              <div className="flex items-center gap-2">
+                <span className="text-sm font-bold">Vous êtes {current.plan}</span>
+                <Badge tone="success">Actif</Badge>
+              </div>
+              {current.endDate && (
+                <div className="text-xs text-ink-muted mt-1">
+                  Renouvellement le{' '}
+                  {new Date(current.endDate).toLocaleDateString('fr-FR', {
+                    day: 'numeric',
+                    month: 'long',
+                    year: 'numeric',
+                  })}
+                </div>
+              )}
+            </div>
+            <Button variant="ghost" size="sm" onClick={cancel}>
+              Annuler le renouvellement
+            </Button>
+          </div>
+        </Card>
+      )}
+
+      {/* Plans grid */}
+      {loading ? (
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-5">
+          {[...Array(3)].map((_, i) => (
+            <Skeleton key={i} className="h-[480px] rounded-3xl" />
+          ))}
+        </div>
+      ) : plans.length === 0 ? (
+        <Card padding="lg" className="text-center text-sm text-ink-muted">
+          Aucun plan disponible. Réessayez plus tard.
+        </Card>
+      ) : (
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-5">
+          {plans.map((plan) => {
+            const meta = PLAN_META[plan.id] || PLAN_META.BASIC;
+            const isCurrent = current?.plan === plan.id;
+            const isFree = plan.price === 0;
+            const displayedPrice =
+              billingCycle === 'yearly' && plan.price > 0
+                ? Math.round(plan.price * 12 * (1 - yearlyDiscount))
+                : plan.price;
+            const Icon = meta.icon;
+            return (
+              <div
+                key={plan.id}
+                className={`relative rounded-3xl overflow-hidden ${
+                  plan.recommended
+                    ? 'shadow-glow ring-2 ring-brand-500'
+                    : 'shadow-card'
+                }`}
+              >
+                {plan.recommended && (
+                  <div className="absolute top-0 left-0 right-0 bg-gradient-brand text-white text-center py-1.5 text-[10px] font-bold uppercase tracking-wider z-10">
+                    <Star size={10} className="inline mr-1" fill="white" />
+                    Le plus populaire
+                  </div>
+                )}
+
+                {/* Card body */}
                 <div
-                  key={plan.id}
-                  className="card p-5 relative"
-                  style={{
-                    borderColor: plan.color,
-                    borderWidth: plan.recommended ? 2 : 1,
-                  }}
+                  className={`p-6 bg-bg-surface border ${
+                    plan.recommended
+                      ? 'border-brand-500'
+                      : 'border-bg-border'
+                  } ${plan.recommended ? 'pt-12' : ''}`}
                 >
-                  {plan.recommended && (
-                    <div
-                      className="absolute -top-3 left-5 flex items-center gap-1 px-2.5 py-1 rounded-full text-[10px] font-bold text-white"
-                      style={{ background: plan.color }}
-                    >
-                      <Star size={12} fill="#fff" />
-                      RECOMMANDÉ
+                  {/* Header */}
+                  <div
+                    className={`w-14 h-14 rounded-2xl flex items-center justify-center mb-4 bg-gradient-to-br ${meta.bgGradient}`}
+                  >
+                    <Icon size={22} className="text-white" />
+                  </div>
+
+                  <div className="text-xl font-bold" style={{ color: meta.accent }}>
+                    {plan.name}
+                  </div>
+                  <div className="text-xs text-ink-muted mt-1 mb-5">
+                    {isFree
+                      ? 'Gratuit pour toujours'
+                      : `Facturé ${billingCycle === 'yearly' ? 'annuellement' : 'mensuellement'}`}
+                  </div>
+
+                  {/* Price */}
+                  <div className="flex items-baseline gap-1 mb-1">
+                    <span className="text-4xl font-bold tracking-tight">
+                      {isFree ? '0' : displayedPrice.toLocaleString('fr-FR')}
+                    </span>
+                    <span className="text-base font-semibold text-ink-muted">Ar</span>
+                    <span className="text-xs text-ink-dim ml-1">
+                      /{billingCycle === 'yearly' ? 'an' : 'mois'}
+                    </span>
+                  </div>
+                  {billingCycle === 'yearly' && plan.price > 0 && (
+                    <div className="text-[11px] text-success-400 font-semibold mb-5">
+                      Économisez{' '}
+                      {Math.round(plan.price * 12 * yearlyDiscount).toLocaleString('fr-FR')} Ar/an
                     </div>
                   )}
 
-                  <div className="flex justify-between items-baseline mb-1">
-                    <div className="text-xl font-extrabold" style={{ color: plan.color }}>
-                      {plan.name}
-                    </div>
-                    <div className="text-lg font-bold" style={{ color: colors.text }}>
-                      {plan.priceLabel}
-                    </div>
+                  {/* CTA */}
+                  <div className="my-5">
+                    {isCurrent ? (
+                      <div
+                        className="w-full py-2.5 rounded-xl text-center text-sm font-bold border"
+                        style={{
+                          borderColor: meta.accent,
+                          color: meta.accent,
+                          background: `${meta.accent}15`,
+                        }}
+                      >
+                        Plan actuel
+                      </div>
+                    ) : isFree ? (
+                      <Button variant="secondary" size="md" fullWidth disabled>
+                        Inclus par défaut
+                      </Button>
+                    ) : (
+                      <Button
+                        variant={plan.recommended ? 'primary' : 'secondary'}
+                        size="md"
+                        fullWidth
+                        loading={subscribing === plan.id}
+                        iconEnd={ArrowRight}
+                        onClick={() => subscribe(plan)}
+                      >
+                        Choisir {plan.name}
+                      </Button>
+                    )}
                   </div>
 
-                  <ul className="space-y-2 mt-4 mb-5">
+                  {/* Features */}
+                  <ul className="space-y-2.5 pt-4 border-t border-bg-border">
                     {plan.features.map((f, i) => (
                       <li
                         key={i}
-                        className="flex items-start gap-2 text-sm"
-                        style={{ color: colors.text }}
+                        className="flex items-start gap-2 text-sm text-ink-muted"
                       >
-                        <Check size={16} className="mt-0.5 shrink-0" style={{ color: plan.color }} />
+                        <Check
+                          size={14}
+                          className="mt-0.5 shrink-0"
+                          style={{ color: meta.accent }}
+                          strokeWidth={3}
+                        />
                         <span>{f}</span>
                       </li>
                     ))}
                   </ul>
-
-                  {isCurrent ? (
-                    <div
-                      className="w-full py-2.5 rounded-xl text-center text-sm font-bold"
-                      style={{
-                        background: `${plan.color}20`,
-                        color: plan.color,
-                      }}
-                    >
-                      Plan actuel
-                    </div>
-                  ) : isFree ? (
-                    <div
-                      className="w-full py-2.5 rounded-xl text-center text-sm font-medium"
-                      style={{ color: colors.textSecondary }}
-                    >
-                      Plan par défaut
-                    </div>
-                  ) : (
-                    <button
-                      onClick={() => handleSubscribe(plan)}
-                      disabled={subscribing === plan.id}
-                      className="w-full flex items-center justify-center gap-2 py-2.5 rounded-xl text-sm font-bold text-white"
-                      style={{
-                        background: plan.color,
-                        opacity: subscribing === plan.id ? 0.7 : 1,
-                      }}
-                    >
-                      {subscribing === plan.id ? (
-                        <Loader2 className="animate-spin" size={18} />
-                      ) : (
-                        <>
-                          <Sparkles size={16} />
-                          Souscrire
-                        </>
-                      )}
-                    </button>
-                  )}
                 </div>
-              );
-            })}
-          </div>
-
-          {plans.length === 0 && (
-            <div className="card p-8 text-center text-sm" style={{ color: colors.textSecondary }}>
-              Aucun plan disponible. Réessayez plus tard.
-            </div>
-          )}
+              </div>
+            );
+          })}
         </div>
-      </div>
+      )}
+
+      {/* FAQ / Trust block */}
+      <Card padding="lg">
+        <h3 className="text-base font-bold mb-1">Questions fréquentes</h3>
+        <p className="text-xs text-ink-muted mb-5">
+          Tout ce qu'il faut savoir avant de souscrire
+        </p>
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
+          {[
+            {
+              q: 'Puis-je annuler à tout moment ?',
+              a: 'Oui. L\'annulation prend effet à la fin de la période payée et n\'entraîne aucun frais.',
+            },
+            {
+              q: 'Que se passe-t-il si mon solde est insuffisant ?',
+              a: 'Le renouvellement échoue et vous repassez automatiquement au plan BASIC sans rupture.',
+            },
+            {
+              q: 'Le cashback s\'applique-t-il sur tous mes paiements ?',
+              a: 'Le cashback s\'applique sur les paiements marchands chez les partenaires M\'Paye.',
+            },
+            {
+              q: 'Puis-je changer de plan ?',
+              a: 'Oui, à tout moment — la différence est calculée au prorata du temps restant.',
+            },
+          ].map((item, i) => (
+            <div key={i}>
+              <div className="text-sm font-bold mb-1.5">{item.q}</div>
+              <div className="text-xs text-ink-muted leading-relaxed">{item.a}</div>
+            </div>
+          ))}
+        </div>
+      </Card>
     </div>
   );
 }

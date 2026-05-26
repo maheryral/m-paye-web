@@ -6,19 +6,18 @@ import {
   EyeOff,
   Fingerprint,
   KeyRound,
-  Loader2,
   Lock,
   LogOut,
   Monitor,
   Shield,
+  ShieldCheck,
   Smartphone,
   Trash2,
 } from 'lucide-react';
 import { useState } from 'react';
-import GradientHeader from '../../components/GradientHeader';
 import { useAuth } from '../../contexts/AuthContext';
-import { useColors } from '../../contexts/ThemeContext';
 import { authService } from '../../services/api';
+import { Badge, Button, Card, Input, PageHeader } from '../../ui';
 
 interface Session {
   id: string;
@@ -29,33 +28,32 @@ interface Session {
   lastActivity: string;
 }
 
-function formatRelativeDate(dateString: string) {
-  const date = new Date(dateString);
-  const days = Math.floor((Date.now() - date.getTime()) / 86400000);
-  if (days === 0) return "Aujourd'hui";
-  if (days === 1) return 'Hier';
-  return `Il y a ${days} jours`;
+function timeAgo(iso: string): string {
+  const d = (Date.now() - new Date(iso).getTime()) / 1000;
+  if (d < 60) return "À l'instant";
+  if (d < 3600) return `Il y a ${Math.floor(d / 60)} min`;
+  if (d < 86400) return `Il y a ${Math.floor(d / 3600)} h`;
+  if (d < 172800) return 'Hier';
+  return `Il y a ${Math.floor(d / 86400)} jours`;
 }
 
 export default function Security() {
-  const colors = useColors();
   const { logoutAllDevices } = useAuth();
 
-  const [currentPassword, setCurrentPassword] = useState('');
-  const [newPassword, setNewPassword] = useState('');
-  const [confirmPassword, setConfirmPassword] = useState('');
+  const [currentPwd, setCurrentPwd] = useState('');
+  const [newPwd, setNewPwd] = useState('');
+  const [confirmPwd, setConfirmPwd] = useState('');
   const [showPwd, setShowPwd] = useState(false);
   const [loading, setLoading] = useState(false);
-  const [message, setMessage] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
+  const [msg, setMsg] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
 
   const [twoFactor, setTwoFactor] = useState(false);
   const [biometric, setBiometric] = useState(false);
 
-  // Sessions de démonstration — le backend pourrait exposer GET /auth/sessions
   const [sessions, setSessions] = useState<Session[]>([
     {
       id: 'current',
-      deviceName: 'Navigateur web',
+      deviceName: 'Navigateur web (Chrome)',
       location: 'Antananarivo, Madagascar',
       ipAddress: '—',
       current: true,
@@ -63,39 +61,38 @@ export default function Security() {
     },
   ]);
 
-  const securityScore =
+  // Security score: max 100
+  const passwordStrength = newPwd.length === 0 ? 0 : Math.min(100, newPwd.length * 8);
+  const score =
     50 +
     (twoFactor ? 25 : 0) +
     (biometric ? 15 : 0) +
     (sessions.length === 1 ? 10 : 0);
 
-  const showMessage = (type: 'success' | 'error', text: string) => {
-    setMessage({ type, text });
-    setTimeout(() => setMessage(null), 3000);
+  const scoreColor =
+    score >= 80 ? '#10B981' : score >= 60 ? '#F59E0B' : '#F43F5E';
+  const scoreLabel =
+    score >= 80 ? 'Excellent' : score >= 60 ? 'Bon' : 'À renforcer';
+
+  const flash = (type: 'success' | 'error', text: string) => {
+    setMsg({ type, text });
+    setTimeout(() => setMsg(null), 3500);
   };
 
-  const handleChangePassword = async () => {
-    if (!currentPassword || !newPassword || !confirmPassword) {
-      showMessage('error', 'Veuillez remplir tous les champs');
-      return;
-    }
-    if (newPassword.length < 6) {
-      showMessage('error', 'Le mot de passe doit contenir au moins 6 caractères');
-      return;
-    }
-    if (newPassword !== confirmPassword) {
-      showMessage('error', 'Les mots de passe ne correspondent pas');
-      return;
-    }
+  const changePwd = async (e?: React.FormEvent) => {
+    e?.preventDefault();
+    if (!currentPwd || !newPwd || !confirmPwd) return flash('error', 'Remplissez tous les champs');
+    if (newPwd.length < 8) return flash('error', 'Au moins 8 caractères requis');
+    if (newPwd !== confirmPwd) return flash('error', 'Les mots de passe ne correspondent pas');
     setLoading(true);
     try {
-      await authService.changePassword({ currentPassword, newPassword });
-      setCurrentPassword('');
-      setNewPassword('');
-      setConfirmPassword('');
-      showMessage('success', 'Mot de passe mis à jour avec succès');
+      await authService.changePassword({ currentPassword: currentPwd, newPassword: newPwd });
+      setCurrentPwd('');
+      setNewPwd('');
+      setConfirmPwd('');
+      flash('success', 'Mot de passe mis à jour avec succès');
     } catch (e: any) {
-      showMessage('error', e?.response?.data?.message || 'Erreur lors du changement');
+      flash('error', e?.response?.data?.message || 'Erreur');
     } finally {
       setLoading(false);
     }
@@ -106,259 +103,250 @@ export default function Security() {
     try {
       await logoutAllDevices();
       setSessions((prev) => prev.filter((s) => s.current));
-      showMessage('success', 'Tous les autres appareils ont été déconnectés');
+      flash('success', 'Tous les autres appareils déconnectés');
     } catch {
-      showMessage('error', 'Erreur lors de la déconnexion');
+      flash('error', 'Échec de la déconnexion');
     }
   };
 
   return (
-    <div className="min-h-screen bg-bg pb-8">
-      <div className="max-w-3xl mx-auto">
-        <GradientHeader title="Sécurité" subtitle="Protégez votre compte" />
+    <div className="space-y-6 animate-fade-in">
+      <PageHeader
+        title="Sécurité"
+        subtitle="Protégez votre compte et vos transactions"
+      />
 
-        <div className="px-5 mt-4 space-y-5">
-          {/* Score de sécurité */}
-          <div className="card p-4">
-            <div className="flex items-center gap-3 mb-3">
+      {msg && (
+        <div
+          className={`flex items-center gap-2 p-3 rounded-xl text-sm font-medium animate-slide-in ${
+            msg.type === 'success'
+              ? 'bg-success-bg text-success-400 border border-success-500/30'
+              : 'bg-danger-bg text-danger-400 border border-danger-500/30'
+          }`}
+        >
+          {msg.type === 'success' ? <CheckCircle2 size={18} /> : <AlertCircle size={18} />}
+          {msg.text}
+        </div>
+      )}
+
+      <div className="grid grid-cols-1 lg:grid-cols-3 gap-5">
+        {/* === Score + summary (sticky) === */}
+        <div className="space-y-4 lg:sticky lg:top-20 lg:self-start">
+          <Card padding="lg">
+            <div className="text-center">
               <div
-                className="w-12 h-12 rounded-full flex items-center justify-center"
-                style={{ background: `${colors.primary}20` }}
-              >
-                <Shield size={24} style={{ color: colors.primary }} />
-              </div>
-              <div className="flex-1">
-                <div className="text-sm font-bold" style={{ color: colors.text }}>
-                  Score de sécurité
-                </div>
-                <div className="text-xs" style={{ color: colors.textSecondary }}>
-                  {securityScore >= 80
-                    ? 'Excellent'
-                    : securityScore >= 60
-                      ? 'Bon'
-                      : 'À améliorer'}
-                </div>
-              </div>
-              <div className="text-2xl font-extrabold" style={{ color: colors.primary }}>
-                {securityScore}
-              </div>
-            </div>
-            <div className="h-2 rounded-full bg-bg overflow-hidden">
-              <div
-                className="h-full transition-all"
+                className="relative w-32 h-32 mx-auto"
                 style={{
-                  width: `${securityScore}%`,
-                  background:
-                    securityScore >= 80
-                      ? colors.success
-                      : securityScore >= 60
-                        ? colors.warning
-                        : colors.error,
+                  background: `conic-gradient(${scoreColor} ${score * 3.6}deg, #262F4A 0deg)`,
+                  borderRadius: '50%',
                 }}
-              />
+              >
+                <div className="absolute inset-2 rounded-full bg-bg-surface flex flex-col items-center justify-center">
+                  <div className="text-3xl font-bold" style={{ color: scoreColor }}>
+                    {score}
+                  </div>
+                  <div className="text-[10px] text-ink-muted uppercase tracking-wider">
+                    /100
+                  </div>
+                </div>
+              </div>
+              <div className="mt-4 text-sm font-bold">Score de sécurité</div>
+              <Badge tone={score >= 80 ? 'success' : score >= 60 ? 'warning' : 'danger'} className="mt-2">
+                {scoreLabel}
+              </Badge>
             </div>
-          </div>
 
-          {/* Message */}
-          {message && (
-            <div
-              className="flex items-center gap-2 p-3 rounded-xl text-sm"
-              style={{
-                background:
-                  message.type === 'success' ? `${colors.success}15` : `${colors.error}15`,
-                color: message.type === 'success' ? colors.success : colors.error,
-              }}
-            >
-              {message.type === 'success' ? <CheckCircle2 size={18} /> : <AlertCircle size={18} />}
-              {message.text}
+            <div className="mt-5 pt-5 border-t border-bg-border space-y-2.5">
+              <Checkmark done label="Mot de passe défini" />
+              <Checkmark done={twoFactor} label="Auth 2FA activée" />
+              <Checkmark done={biometric} label="Biométrie WebAuthn" />
+              <Checkmark done={sessions.length === 1} label="Une seule session" />
             </div>
-          )}
+          </Card>
+        </div>
 
-          {/* Changer mot de passe */}
-          <section>
-            <h3
-              className="text-xs font-bold uppercase tracking-wider mb-3"
-              style={{ color: colors.textSecondary }}
-            >
-              Changer le mot de passe
-            </h3>
-            <div className="card p-4 space-y-3">
-              <PasswordField
+        {/* === Sections === */}
+        <div className="lg:col-span-2 space-y-5">
+          {/* Change password */}
+          <Card padding="md">
+            <div className="flex items-center gap-2 mb-1">
+              <KeyRound size={18} className="text-brand-300" />
+              <h3 className="text-base font-bold">Mot de passe</h3>
+            </div>
+            <p className="text-xs text-ink-muted mb-5">
+              Utilisez au moins 8 caractères, avec des lettres, chiffres et symboles
+            </p>
+
+            <form onSubmit={changePwd} className="space-y-4">
+              <Input
                 label="Mot de passe actuel"
-                value={currentPassword}
-                onChange={setCurrentPassword}
-                show={showPwd}
-                colors={colors}
+                type={showPwd ? 'text' : 'password'}
+                icon={Lock}
+                iconEnd={showPwd ? EyeOff : Eye}
+                onIconEndClick={() => setShowPwd((v) => !v)}
+                value={currentPwd}
+                onChange={(e) => setCurrentPwd(e.target.value)}
+                autoComplete="current-password"
               />
-              <PasswordField
+              <Input
                 label="Nouveau mot de passe"
-                value={newPassword}
-                onChange={setNewPassword}
-                show={showPwd}
-                colors={colors}
+                type={showPwd ? 'text' : 'password'}
+                icon={KeyRound}
+                value={newPwd}
+                onChange={(e) => setNewPwd(e.target.value)}
+                autoComplete="new-password"
               />
-              <PasswordField
+              {newPwd.length > 0 && (
+                <div>
+                  <div className="flex justify-between text-[10px] uppercase tracking-wider mb-1">
+                    <span className="text-ink-dim">Force</span>
+                    <span
+                      style={{
+                        color: passwordStrength >= 80 ? '#10B981' : passwordStrength >= 50 ? '#F59E0B' : '#F43F5E',
+                      }}
+                      className="font-bold"
+                    >
+                      {passwordStrength >= 80
+                        ? 'Forte'
+                        : passwordStrength >= 50
+                          ? 'Moyenne'
+                          : 'Faible'}
+                    </span>
+                  </div>
+                  <div className="h-1.5 bg-bg-elevated rounded-full overflow-hidden">
+                    <div
+                      className="h-full transition-all"
+                      style={{
+                        width: `${passwordStrength}%`,
+                        background:
+                          passwordStrength >= 80
+                            ? '#10B981'
+                            : passwordStrength >= 50
+                              ? '#F59E0B'
+                              : '#F43F5E',
+                      }}
+                    />
+                  </div>
+                </div>
+              )}
+              <Input
                 label="Confirmer le mot de passe"
-                value={confirmPassword}
-                onChange={setConfirmPassword}
-                show={showPwd}
-                colors={colors}
+                type={showPwd ? 'text' : 'password'}
+                icon={KeyRound}
+                value={confirmPwd}
+                onChange={(e) => setConfirmPwd(e.target.value)}
+                error={confirmPwd && newPwd !== confirmPwd ? 'Les mots de passe ne correspondent pas' : undefined}
+                autoComplete="new-password"
               />
-              <button
-                type="button"
-                onClick={() => setShowPwd((v) => !v)}
-                className="flex items-center gap-1.5 text-xs font-semibold"
-                style={{ color: colors.primary }}
+              <Button
+                type="submit"
+                variant="primary"
+                size="md"
+                loading={loading}
+                icon={Check}
+                disabled={!currentPwd || !newPwd || !confirmPwd}
               >
-                {showPwd ? <EyeOff size={14} /> : <Eye size={14} />}
-                {showPwd ? 'Masquer' : 'Afficher'} les mots de passe
-              </button>
-              <button
-                onClick={handleChangePassword}
-                disabled={loading}
-                className="w-full flex items-center justify-center gap-2 py-3 rounded-xl font-bold text-white"
-                style={{ background: colors.primary, opacity: loading ? 0.7 : 1 }}
-              >
-                {loading ? (
-                  <Loader2 className="animate-spin" size={20} />
-                ) : (
-                  <>
-                    <KeyRound size={18} />
-                    Mettre à jour
-                  </>
-                )}
-              </button>
-            </div>
-          </section>
+                Mettre à jour
+              </Button>
+            </form>
+          </Card>
 
-          {/* Options sécurité */}
-          <section>
-            <h3
-              className="text-xs font-bold uppercase tracking-wider mb-3"
-              style={{ color: colors.textSecondary }}
-            >
-              Options de sécurité
-            </h3>
-            <div className="space-y-2">
+          {/* Toggles */}
+          <Card padding="md">
+            <div className="flex items-center gap-2 mb-4">
+              <ShieldCheck size={18} className="text-brand-300" />
+              <h3 className="text-base font-bold">Méthodes de vérification</h3>
+            </div>
+            <div className="divide-y divide-bg-border">
               <SecurityToggle
                 icon={Lock}
-                title="Authentification à 2 facteurs"
-                description="Ajoutez une couche de sécurité supplémentaire"
+                title="Authentification à 2 facteurs (2FA)"
+                description="Code unique envoyé par SMS ou app authenticator à chaque connexion"
                 enabled={twoFactor}
                 onToggle={() => setTwoFactor((v) => !v)}
-                colors={colors}
               />
               <SecurityToggle
                 icon={Fingerprint}
-                title="Authentification biométrique"
-                description="WebAuthn (Touch ID, Face ID, clé matérielle)"
+                title="WebAuthn (Touch ID, Face ID, clé matérielle)"
+                description="Authentification biométrique du navigateur ou clé physique FIDO2"
                 enabled={biometric}
                 onToggle={() => setBiometric((v) => !v)}
-                colors={colors}
               />
             </div>
-          </section>
+          </Card>
 
-          {/* Sessions actives */}
-          <section>
-            <div className="flex justify-between items-center mb-3">
-              <h3
-                className="text-xs font-bold uppercase tracking-wider"
-                style={{ color: colors.textSecondary }}
-              >
-                Sessions actives
-              </h3>
+          {/* Sessions */}
+          <Card padding="md">
+            <div className="flex items-center justify-between mb-4">
+              <div className="flex items-center gap-2">
+                <Shield size={18} className="text-brand-300" />
+                <h3 className="text-base font-bold">Sessions actives</h3>
+              </div>
               {sessions.length > 1 && (
-                <button
-                  onClick={revokeAll}
-                  className="text-xs font-semibold flex items-center gap-1"
-                  style={{ color: colors.error }}
-                >
-                  <LogOut size={12} />
-                  Déconnecter tous
-                </button>
+                <Button variant="danger" size="sm" icon={LogOut} onClick={revokeAll}>
+                  Tout déconnecter
+                </Button>
               )}
             </div>
             <div className="space-y-2">
-              {sessions.map((s) => (
-                <div key={s.id} className="card p-3.5 flex items-center gap-3">
+              {sessions.map((s) => {
+                const isMobile =
+                  s.deviceName.toLowerCase().includes('iphone') ||
+                  s.deviceName.toLowerCase().includes('android');
+                const DeviceIcon = isMobile ? Smartphone : Monitor;
+                return (
                   <div
-                    className="w-11 h-11 rounded-xl flex items-center justify-center shrink-0"
-                    style={{ background: `${colors.primary}20` }}
+                    key={s.id}
+                    className="flex items-center gap-3 p-3.5 rounded-xl border border-bg-border bg-bg-elevated/40"
                   >
-                    {s.deviceName.toLowerCase().includes('iphone') ||
-                    s.deviceName.toLowerCase().includes('android') ? (
-                      <Smartphone size={22} style={{ color: colors.primary }} />
-                    ) : (
-                      <Monitor size={22} style={{ color: colors.primary }} />
+                    <div className="w-11 h-11 rounded-xl bg-bg-elevated text-brand-300 flex items-center justify-center shrink-0">
+                      <DeviceIcon size={18} />
+                    </div>
+                    <div className="flex-1 min-w-0">
+                      <div className="flex items-center gap-2">
+                        <div className="text-sm font-bold truncate">{s.deviceName}</div>
+                        {s.current && (
+                          <Badge tone="success">Cet appareil</Badge>
+                        )}
+                      </div>
+                      <div className="text-xs text-ink-muted truncate">{s.location}</div>
+                      <div className="text-[11px] text-ink-dim mt-0.5">
+                        {timeAgo(s.lastActivity)} · {s.ipAddress}
+                      </div>
+                    </div>
+                    {!s.current && (
+                      <button
+                        onClick={() =>
+                          setSessions((prev) => prev.filter((x) => x.id !== s.id))
+                        }
+                        className="p-2 rounded-lg hover:bg-danger-bg text-ink-muted hover:text-danger-400"
+                        title="Déconnecter"
+                      >
+                        <Trash2 size={16} />
+                      </button>
                     )}
                   </div>
-                  <div className="flex-1 min-w-0">
-                    <div className="flex items-center gap-2">
-                      <div className="text-sm font-semibold truncate" style={{ color: colors.text }}>
-                        {s.deviceName}
-                      </div>
-                      {s.current && (
-                        <span
-                          className="text-[10px] font-bold px-1.5 py-0.5 rounded"
-                          style={{ background: `${colors.success}20`, color: colors.success }}
-                        >
-                          ACTUEL
-                        </span>
-                      )}
-                    </div>
-                    <div className="text-xs truncate" style={{ color: colors.textSecondary }}>
-                      {s.location}
-                    </div>
-                    <div className="text-[11px]" style={{ color: colors.textSecondary }}>
-                      {formatRelativeDate(s.lastActivity)} · {s.ipAddress}
-                    </div>
-                  </div>
-                  {!s.current && (
-                    <button
-                      onClick={() => setSessions((prev) => prev.filter((x) => x.id !== s.id))}
-                      className="w-9 h-9 rounded-lg flex items-center justify-center"
-                      style={{ background: `${colors.error}20`, color: colors.error }}
-                      title="Déconnecter cet appareil"
-                    >
-                      <Trash2 size={16} />
-                    </button>
-                  )}
-                </div>
-              ))}
+                );
+              })}
             </div>
-          </section>
+          </Card>
         </div>
       </div>
     </div>
   );
 }
 
-function PasswordField({
-  label,
-  value,
-  onChange,
-  show,
-  colors,
-}: {
-  label: string;
-  value: string;
-  onChange: (v: string) => void;
-  show: boolean;
-  colors: any;
-}) {
+function Checkmark({ done, label }: { done: boolean; label: string }) {
   return (
-    <div>
-      <label className="text-xs font-semibold mb-1.5 block" style={{ color: colors.textSecondary }}>
-        {label}
-      </label>
-      <input
-        type={show ? 'text' : 'password'}
-        className="w-full bg-transparent border rounded-xl px-3 py-2.5 text-sm outline-none"
-        style={{ color: colors.text, borderColor: colors.border }}
-        value={value}
-        onChange={(e) => onChange(e.target.value)}
-      />
+    <div className="flex items-center gap-2 text-sm">
+      <div
+        className={`w-4 h-4 rounded-full flex items-center justify-center shrink-0 ${
+          done ? 'bg-success-500 text-white' : 'bg-bg-elevated text-ink-dim'
+        }`}
+      >
+        <Check size={10} strokeWidth={3} />
+      </div>
+      <span className={done ? 'text-ink' : 'text-ink-muted'}>{label}</span>
     </div>
   );
 }
@@ -369,41 +357,36 @@ function SecurityToggle({
   description,
   enabled,
   onToggle,
-  colors,
 }: {
-  icon: any;
+  icon: typeof Lock;
   title: string;
   description: string;
   enabled: boolean;
   onToggle: () => void;
-  colors: any;
 }) {
   return (
-    <div className="card p-3.5 flex items-center gap-3">
+    <div className="flex items-start gap-3 py-3.5">
       <div
-        className="w-11 h-11 rounded-xl flex items-center justify-center shrink-0"
-        style={{ background: enabled ? `${colors.success}20` : `${colors.primary}20` }}
+        className={`w-10 h-10 rounded-xl flex items-center justify-center shrink-0 ${
+          enabled
+            ? 'bg-success-bg text-success-400'
+            : 'bg-bg-elevated text-ink-muted'
+        }`}
       >
-        <Icon size={22} style={{ color: enabled ? colors.success : colors.primary }} />
+        <Icon size={16} />
       </div>
-      <div className="flex-1 min-w-0">
-        <div className="flex items-center gap-2">
-          <div className="text-sm font-semibold" style={{ color: colors.text }}>
-            {title}
-          </div>
-          {enabled && <Check size={14} style={{ color: colors.success }} />}
-        </div>
-        <div className="text-xs mt-0.5" style={{ color: colors.textSecondary }}>
-          {description}
-        </div>
+      <div className="flex-1 min-w-0 pt-0.5">
+        <div className="text-sm font-bold">{title}</div>
+        <div className="text-xs text-ink-muted mt-0.5">{description}</div>
       </div>
       <button
         type="button"
         onClick={onToggle}
         role="switch"
         aria-checked={enabled}
-        className="relative w-11 h-6 rounded-full transition-colors shrink-0"
-        style={{ background: enabled ? colors.primary : colors.border }}
+        className={`relative w-11 h-6 rounded-full transition-colors shrink-0 mt-1 ${
+          enabled ? 'bg-gradient-brand' : 'bg-bg-elevated border border-bg-border'
+        }`}
       >
         <span
           className="absolute top-0.5 w-5 h-5 rounded-full bg-white shadow transition-transform"

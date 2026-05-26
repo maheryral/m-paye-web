@@ -1,19 +1,30 @@
 import {
-  Loader2,
+  Mail,
+  MoreVertical,
   Pencil,
+  Phone,
   Plus,
   Search,
   Send,
   Star,
   Trash2,
+  User as UserIcon,
   Users,
   X,
 } from 'lucide-react';
 import { useEffect, useMemo, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import GradientHeader from '../../components/GradientHeader';
-import { useColors } from '../../contexts/ThemeContext';
 import { beneficiaryService } from '../../services/api';
+import {
+  Avatar,
+  Badge,
+  Button,
+  Card,
+  Empty,
+  Input,
+  PageHeader,
+  Skeleton,
+} from '../../ui';
 
 interface Beneficiary {
   id: string;
@@ -25,7 +36,8 @@ interface Beneficiary {
   lastDate?: string;
 }
 
-const SEVEN_DAYS_MS = 7 * 24 * 60 * 60 * 1000;
+type View = 'all' | 'favorites' | 'recent';
+const SEVEN_DAYS = 7 * 24 * 60 * 60 * 1000;
 
 function formatPhone(phone: string) {
   const c = phone.replace(/\s/g, '');
@@ -37,15 +49,17 @@ function formatPhone(phone: string) {
 
 export default function Beneficiaries() {
   const navigate = useNavigate();
-  const colors = useColors();
+
   const [items, setItems] = useState<Beneficiary[]>([]);
   const [loading, setLoading] = useState(true);
-  const [searchTerm, setSearchTerm] = useState('');
-  const [showModal, setShowModal] = useState(false);
+  const [search, setSearch] = useState('');
+  const [view, setView] = useState<View>('all');
+
+  const [panelOpen, setPanelOpen] = useState(false);
   const [editing, setEditing] = useState<Beneficiary | null>(null);
   const [submitting, setSubmitting] = useState(false);
-  const [formData, setFormData] = useState({ name: '', phone: '', email: '' });
-  const [formErrors, setFormErrors] = useState<Record<string, string>>({});
+  const [form, setForm] = useState({ name: '', phone: '', email: '' });
+  const [errors, setErrors] = useState<Record<string, string>>({});
 
   useEffect(() => {
     void load();
@@ -57,47 +71,57 @@ export default function Beneficiaries() {
       const data = await beneficiaryService.list();
       setItems(Array.isArray(data) ? data : []);
     } catch (e: any) {
-      console.error('Erreur chargement bénéficiaires:', e?.response?.data || e?.message);
-      alert(e?.response?.data?.message || 'Impossible de charger les bénéficiaires');
+      console.error('Erreur:', e?.response?.data || e?.message);
     } finally {
       setLoading(false);
     }
   };
 
   const validate = () => {
-    const errors: Record<string, string> = {};
-    if (!formData.name.trim()) errors.name = 'Le nom est requis';
-    if (!formData.phone.trim()) errors.phone = 'Le numéro de téléphone est requis';
-    if (formData.email && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(formData.email)) {
-      errors.email = 'Email invalide';
-    }
-    setFormErrors(errors);
-    return Object.keys(errors).length === 0;
+    const e: Record<string, string> = {};
+    if (!form.name.trim()) e.name = 'Le nom est requis';
+    if (!form.phone.trim()) e.phone = 'Le numéro est requis';
+    if (form.email && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(form.email))
+      e.email = 'Email invalide';
+    setErrors(e);
+    return Object.keys(e).length === 0;
   };
 
   const resetForm = () => {
-    setFormData({ name: '', phone: '', email: '' });
-    setFormErrors({});
+    setForm({ name: '', phone: '', email: '' });
+    setErrors({});
     setEditing(null);
-    setShowModal(false);
+    setPanelOpen(false);
   };
 
-  const handleSubmit = async () => {
+  const openCreate = () => {
+    resetForm();
+    setPanelOpen(true);
+  };
+
+  const openEdit = (b: Beneficiary) => {
+    setEditing(b);
+    setForm({ name: b.name, phone: b.phone, email: b.email || '' });
+    setErrors({});
+    setPanelOpen(true);
+  };
+
+  const submit = async () => {
     if (!validate()) return;
     setSubmitting(true);
     try {
       if (editing) {
         const updated = await beneficiaryService.update(editing.id, {
-          name: formData.name.trim(),
-          phone: formData.phone.replace(/\s/g, ''),
-          email: formData.email?.trim() || undefined,
+          name: form.name.trim(),
+          phone: form.phone.replace(/\s/g, ''),
+          email: form.email?.trim() || undefined,
         });
         setItems((prev) => prev.map((b) => (b.id === updated.id ? updated : b)));
       } else {
         const created = await beneficiaryService.create({
-          name: formData.name.trim(),
-          phone: formData.phone.replace(/\s/g, ''),
-          email: formData.email?.trim() || undefined,
+          name: form.name.trim(),
+          phone: form.phone.replace(/\s/g, ''),
+          email: form.email?.trim() || undefined,
         });
         setItems((prev) => [created, ...prev]);
       }
@@ -109,330 +133,332 @@ export default function Beneficiaries() {
     }
   };
 
-  const handleDelete = async (id: string) => {
+  const remove = async (id: string) => {
     if (!confirm('Supprimer ce bénéficiaire ?')) return;
     try {
       await beneficiaryService.remove(id);
       setItems((prev) => prev.filter((b) => b.id !== id));
     } catch (e: any) {
-      alert(e?.response?.data?.message || 'Erreur suppression');
+      alert(e?.response?.data?.message || 'Erreur');
     }
   };
 
-  const handleToggleFavorite = async (id: string) => {
+  const toggleFav = async (id: string) => {
     try {
       const updated = await beneficiaryService.toggleFavorite(id);
       setItems((prev) => prev.map((b) => (b.id === id ? updated : b)));
-    } catch (e: any) {
-      alert(e?.response?.data?.message || 'Action impossible');
+    } catch {
+      /* */
     }
   };
 
-  const openEdit = (b: Beneficiary) => {
-    setEditing(b);
-    setFormData({ name: b.name, phone: b.phone, email: b.email || '' });
-    setShowModal(true);
+  const isRecent = (b: Beneficiary) =>
+    !!b.lastDate && Date.now() - new Date(b.lastDate).getTime() < SEVEN_DAYS;
+
+  const filtered = useMemo(() => {
+    let res = items;
+    if (view === 'favorites') res = res.filter((b) => b.isFavorite);
+    if (view === 'recent') res = res.filter(isRecent);
+    if (search) {
+      const q = search.toLowerCase();
+      res = res.filter(
+        (b) =>
+          b.name.toLowerCase().includes(q) ||
+          b.phone.includes(search) ||
+          (b.email && b.email.toLowerCase().includes(q)),
+      );
+    }
+    return res;
+  }, [items, view, search]);
+
+  const counts = {
+    all: items.length,
+    favorites: items.filter((b) => b.isFavorite).length,
+    recent: items.filter(isRecent).length,
   };
 
-  const filtered = useMemo(
-    () =>
-      items.filter((b) => {
-        const q = searchTerm.toLowerCase();
-        return (
-          b.name.toLowerCase().includes(q) ||
-          b.phone.includes(searchTerm) ||
-          (b.email && b.email.toLowerCase().includes(q))
-        );
-      }),
-    [items, searchTerm],
-  );
-
-  const isRecent = (b: Beneficiary) =>
-    !!b.lastDate && Date.now() - new Date(b.lastDate).getTime() < SEVEN_DAYS_MS;
-  const favorites = filtered.filter((b) => b.isFavorite);
-  const recents = filtered.filter((b) => isRecent(b) && !b.isFavorite);
-  const others = filtered.filter((b) => !b.isFavorite && !isRecent(b));
-
   return (
-    <div className="min-h-screen bg-bg pb-8">
-      <div className="max-w-3xl mx-auto">
-        <GradientHeader
-          title="Bénéficiaires"
-          subtitle={`${items.length} contact${items.length > 1 ? 's' : ''}`}
-          RightIcon={Plus}
-          onRightPress={() => {
-            resetForm();
-            setShowModal(true);
-          }}
-        />
+    <div className="space-y-6 animate-fade-in">
+      <PageHeader
+        title="Bénéficiaires"
+        subtitle="Vos destinataires sauvegardés pour des transferts rapides"
+        actions={
+          <Button variant="primary" size="sm" icon={Plus} onClick={openCreate}>
+            Ajouter
+          </Button>
+        }
+      />
 
-        <div className="px-5 mt-4 space-y-4">
-          {/* Search */}
-          <div
-            className="flex items-center gap-2 px-3 h-11 rounded-xl border"
-            style={{ borderColor: colors.border, background: colors.card }}
-          >
-            <Search size={20} style={{ color: colors.textSecondary }} />
-            <input
-              className="flex-1 bg-transparent outline-none text-sm"
-              style={{ color: colors.text }}
+      {/* Filter bar */}
+      <Card padding="md">
+        <div className="flex flex-col lg:flex-row gap-3">
+          <div className="flex-1">
+            <Input
+              icon={Search}
               placeholder="Rechercher par nom, téléphone, email..."
-              value={searchTerm}
-              onChange={(e) => setSearchTerm(e.target.value)}
+              value={search}
+              onChange={(e) => setSearch(e.target.value)}
             />
-            {searchTerm && (
-              <button onClick={() => setSearchTerm('')}>
-                <X size={18} style={{ color: colors.textSecondary }} />
-              </button>
-            )}
           </div>
+          <div className="flex gap-1 p-1 bg-bg-elevated rounded-xl shrink-0">
+            {[
+              { id: 'all' as View, label: 'Tous', count: counts.all },
+              { id: 'favorites' as View, label: 'Favoris', count: counts.favorites },
+              { id: 'recent' as View, label: 'Récents', count: counts.recent },
+            ].map((v) => {
+              const active = view === v.id;
+              return (
+                <button
+                  key={v.id}
+                  onClick={() => setView(v.id)}
+                  className={`px-3 py-1.5 rounded-lg text-xs font-semibold transition-all flex items-center gap-1.5 ${
+                    active
+                      ? 'bg-brand-500 text-white'
+                      : 'text-ink-muted hover:text-ink'
+                  }`}
+                >
+                  {v.label}
+                  {v.count > 0 && (
+                    <span
+                      className={`text-[10px] px-1 rounded ${
+                        active ? 'bg-white/25' : 'bg-bg-surface'
+                      }`}
+                    >
+                      {v.count}
+                    </span>
+                  )}
+                </button>
+              );
+            })}
+          </div>
+        </div>
+      </Card>
 
-          {loading ? (
-            <div className="flex justify-center py-16">
-              <Loader2 className="animate-spin" size={32} style={{ color: colors.primary }} />
-            </div>
-          ) : items.length === 0 ? (
-            <div className="flex flex-col items-center justify-center py-16 gap-3">
-              <Users size={64} style={{ color: colors.textSecondary }} />
-              <div className="text-base" style={{ color: colors.textSecondary }}>
-                Aucun bénéficiaire
-              </div>
-              <button
-                onClick={() => setShowModal(true)}
-                className="mt-2 px-4 py-2 rounded-xl font-semibold text-white text-sm"
-                style={{ background: colors.primary }}
-              >
+      {/* Grid */}
+      {loading ? (
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
+          {[...Array(6)].map((_, i) => (
+            <Skeleton key={i} className="h-44 rounded-2xl" />
+          ))}
+        </div>
+      ) : filtered.length === 0 ? (
+        <Card padding="lg">
+          <Empty
+            icon={Users}
+            title={
+              search || view !== 'all'
+                ? 'Aucun résultat'
+                : 'Aucun bénéficiaire'
+            }
+            description={
+              search || view !== 'all'
+                ? "Essayez d'ajuster vos filtres"
+                : 'Ajoutez vos premiers contacts pour des transferts en un clic'
+            }
+            action={
+              <Button variant="primary" size="sm" icon={Plus} onClick={openCreate}>
                 Ajouter un bénéficiaire
-              </button>
-            </div>
-          ) : (
-            <>
-              {favorites.length > 0 && (
-                <BeneficiarySection
-                  title="Favoris"
-                  list={favorites}
-                  onSend={(b) => navigate(`/transfers?toPhone=${b.phone}`)}
-                  onEdit={openEdit}
-                  onDelete={handleDelete}
-                  onToggleFavorite={handleToggleFavorite}
-                />
-              )}
-              {recents.length > 0 && (
-                <BeneficiarySection
-                  title="Récents"
-                  list={recents}
-                  onSend={(b) => navigate(`/transfers?toPhone=${b.phone}`)}
-                  onEdit={openEdit}
-                  onDelete={handleDelete}
-                  onToggleFavorite={handleToggleFavorite}
-                />
-              )}
-              {others.length > 0 && (
-                <BeneficiarySection
-                  title="Tous les bénéficiaires"
-                  list={others}
-                  onSend={(b) => navigate(`/transfers?toPhone=${b.phone}`)}
-                  onEdit={openEdit}
-                  onDelete={handleDelete}
-                  onToggleFavorite={handleToggleFavorite}
-                />
-              )}
-            </>
-          )}
+              </Button>
+            }
+            className="py-16"
+          />
+        </Card>
+      ) : (
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
+          {filtered.map((b) => (
+            <BeneficiaryCard
+              key={b.id}
+              b={b}
+              onSend={() => navigate(`/transfers?toPhone=${b.phone}`)}
+              onEdit={() => openEdit(b)}
+              onDelete={() => remove(b.id)}
+              onToggleFav={() => toggleFav(b.id)}
+            />
+          ))}
         </div>
-      </div>
+      )}
 
-      {/* Modal Add/Edit */}
-      {showModal && (
-        <div
-          className="fixed inset-0 z-50 bg-black/60 flex items-end md:items-center justify-center"
-          onClick={resetForm}
-        >
+      {/* === Slide-over add/edit === */}
+      {panelOpen && (
+        <>
           <div
-            className="w-full md:max-w-md md:mx-4 rounded-t-3xl md:rounded-3xl p-6 space-y-4"
-            style={{ background: colors.card }}
-            onClick={(e) => e.stopPropagation()}
-          >
-            <div className="flex justify-between items-center">
-              <h3 className="text-lg font-bold" style={{ color: colors.text }}>
-                {editing ? 'Modifier le bénéficiaire' : 'Ajouter un bénéficiaire'}
-              </h3>
-              <button onClick={resetForm}>
-                <X size={24} style={{ color: colors.textSecondary }} />
+            className="fixed inset-0 z-40 bg-black/60 backdrop-blur-sm animate-fade-in"
+            onClick={resetForm}
+          />
+          <aside className="fixed inset-y-0 right-0 z-50 w-full max-w-md bg-bg-surface border-l border-bg-border flex flex-col animate-slide-in shadow-elevated">
+            <div className="p-5 border-b border-bg-border flex items-center justify-between shrink-0">
+              <h2 className="text-base font-bold">
+                {editing ? 'Modifier' : 'Nouveau bénéficiaire'}
+              </h2>
+              <button
+                onClick={resetForm}
+                className="p-2 -mr-2 rounded-lg hover:bg-bg-subtle text-ink-muted hover:text-ink"
+              >
+                <X size={18} />
               </button>
             </div>
 
-            <FormField
-              label="Nom complet"
-              value={formData.name}
-              onChange={(v) => setFormData((f) => ({ ...f, name: v }))}
-              error={formErrors.name}
-              colors={colors}
-            />
-            <FormField
-              label="Téléphone"
-              value={formData.phone}
-              onChange={(v) => setFormData((f) => ({ ...f, phone: v }))}
-              error={formErrors.phone}
-              colors={colors}
-              type="tel"
-            />
-            <FormField
-              label="Email (optionnel)"
-              value={formData.email}
-              onChange={(v) => setFormData((f) => ({ ...f, email: v }))}
-              error={formErrors.email}
-              colors={colors}
-              type="email"
-            />
+            <div className="flex-1 overflow-y-auto p-5 space-y-4">
+              {/* Avatar preview */}
+              <div className="flex items-center gap-3 p-4 rounded-xl bg-bg-elevated">
+                <Avatar name={form.name || '?'} size="lg" />
+                <div className="min-w-0">
+                  <div className="text-sm font-bold truncate">
+                    {form.name || 'Nom du bénéficiaire'}
+                  </div>
+                  <div className="text-xs text-ink-muted truncate">
+                    {form.phone ? formatPhone(form.phone) : form.email || 'Aucun contact'}
+                  </div>
+                </div>
+              </div>
 
-            <button
-              onClick={handleSubmit}
-              disabled={submitting}
-              className="w-full flex items-center justify-center gap-2 py-3 rounded-xl font-bold text-white"
-              style={{ background: colors.primary, opacity: submitting ? 0.7 : 1 }}
-            >
-              {submitting ? (
-                <Loader2 className="animate-spin" size={20} />
-              ) : editing ? (
-                'Enregistrer'
-              ) : (
-                'Ajouter'
-              )}
-            </button>
-          </div>
-        </div>
+              <Input
+                label="Nom complet"
+                icon={UserIcon}
+                placeholder="Jean Dupont"
+                value={form.name}
+                onChange={(e) => setForm((f) => ({ ...f, name: e.target.value }))}
+                error={errors.name}
+                autoFocus
+              />
+              <Input
+                label="Numéro de téléphone"
+                icon={Phone}
+                type="tel"
+                placeholder="034 12 345 67"
+                value={form.phone}
+                onChange={(e) => setForm((f) => ({ ...f, phone: e.target.value }))}
+                error={errors.phone}
+              />
+              <Input
+                label="Email (optionnel)"
+                icon={Mail}
+                type="email"
+                placeholder="jean@exemple.com"
+                value={form.email}
+                onChange={(e) => setForm((f) => ({ ...f, email: e.target.value }))}
+                error={errors.email}
+              />
+            </div>
+
+            <div className="p-4 border-t border-bg-border flex gap-2 shrink-0">
+              <Button variant="secondary" size="md" fullWidth onClick={resetForm}>
+                Annuler
+              </Button>
+              <Button
+                variant="primary"
+                size="md"
+                fullWidth
+                loading={submitting}
+                onClick={submit}
+              >
+                {editing ? 'Enregistrer' : 'Ajouter'}
+              </Button>
+            </div>
+          </aside>
+        </>
       )}
     </div>
   );
 }
 
-function FormField({
-  label,
-  value,
-  onChange,
-  error,
-  colors,
-  type = 'text',
-}: {
-  label: string;
-  value: string;
-  onChange: (v: string) => void;
-  error?: string;
-  colors: any;
-  type?: string;
-}) {
-  return (
-    <div>
-      <label className="text-xs font-semibold mb-1.5 block" style={{ color: colors.textSecondary }}>
-        {label}
-      </label>
-      <input
-        type={type}
-        className="w-full bg-transparent border rounded-xl px-3 py-2.5 text-sm outline-none"
-        style={{
-          color: colors.text,
-          borderColor: error ? '#ef4444' : colors.border,
-        }}
-        value={value}
-        onChange={(e) => onChange(e.target.value)}
-      />
-      {error && <div className="text-red-400 text-xs mt-1">{error}</div>}
-    </div>
-  );
-}
-
-function BeneficiarySection({
-  title,
-  list,
+function BeneficiaryCard({
+  b,
   onSend,
   onEdit,
   onDelete,
-  onToggleFavorite,
+  onToggleFav,
 }: {
-  title: string;
-  list: Beneficiary[];
-  onSend: (b: Beneficiary) => void;
-  onEdit: (b: Beneficiary) => void;
-  onDelete: (id: string) => void;
-  onToggleFavorite: (id: string) => void;
+  b: Beneficiary;
+  onSend: () => void;
+  onEdit: () => void;
+  onDelete: () => void;
+  onToggleFav: () => void;
 }) {
-  const colors = useColors();
+  const [menuOpen, setMenuOpen] = useState(false);
+
   return (
-    <section>
-      <h3
-        className="text-xs font-bold uppercase tracking-wider mb-2"
-        style={{ color: colors.textSecondary }}
-      >
-        {title}
-      </h3>
-      <div className="space-y-2">
-        {list.map((item) => (
-          <div key={item.id} className="card p-3.5">
-            <div className="flex items-start gap-3">
-              <div
-                className="w-12 h-12 rounded-full flex items-center justify-center text-white text-base font-bold shrink-0"
-                style={{ background: colors.primary }}
-              >
-                {item.name.charAt(0).toUpperCase()}
-              </div>
-              <div className="flex-1 min-w-0">
-                <div className="flex items-center gap-2">
-                  <div className="text-sm font-semibold truncate" style={{ color: colors.text }}>
-                    {item.name}
-                  </div>
-                  <button onClick={() => onToggleFavorite(item.id)} className="shrink-0">
-                    <Star
-                      size={16}
-                      style={{
-                        color: item.isFavorite ? '#f59e0b' : colors.textSecondary,
-                        fill: item.isFavorite ? '#f59e0b' : 'none',
-                      }}
-                    />
+    <Card padding="md" className="group relative">
+      {/* Top: avatar + actions */}
+      <div className="flex items-start justify-between mb-3">
+        <Avatar name={b.name} size="lg" />
+        <div className="flex items-center gap-1">
+          <button
+            onClick={onToggleFav}
+            className={`p-1.5 rounded-lg transition-colors ${
+              b.isFavorite
+                ? 'text-warning-400 bg-warning-bg'
+                : 'text-ink-muted hover:text-warning-400 hover:bg-warning-bg'
+            }`}
+            aria-label="Favori"
+          >
+            <Star
+              size={16}
+              fill={b.isFavorite ? 'currentColor' : 'none'}
+            />
+          </button>
+          <div className="relative">
+            <button
+              onClick={() => setMenuOpen((v) => !v)}
+              className="p-1.5 rounded-lg text-ink-muted hover:text-ink hover:bg-bg-subtle"
+            >
+              <MoreVertical size={16} />
+            </button>
+            {menuOpen && (
+              <>
+                <div className="fixed inset-0 z-10" onClick={() => setMenuOpen(false)} />
+                <div className="absolute right-0 top-full mt-1 w-40 card shadow-elevated z-20 p-1 animate-slide-in">
+                  <button
+                    onClick={() => {
+                      setMenuOpen(false);
+                      onEdit();
+                    }}
+                    className="w-full flex items-center gap-2 px-2.5 py-2 rounded-lg text-sm text-ink-muted hover:text-ink hover:bg-bg-subtle text-left"
+                  >
+                    <Pencil size={14} />
+                    Modifier
+                  </button>
+                  <button
+                    onClick={() => {
+                      setMenuOpen(false);
+                      onDelete();
+                    }}
+                    className="w-full flex items-center gap-2 px-2.5 py-2 rounded-lg text-sm text-danger-400 hover:bg-danger-bg text-left"
+                  >
+                    <Trash2 size={14} />
+                    Supprimer
                   </button>
                 </div>
-                <div className="text-xs mt-0.5" style={{ color: colors.textSecondary }}>
-                  {formatPhone(item.phone)}
-                </div>
-                {item.email && (
-                  <div className="text-xs truncate" style={{ color: colors.textSecondary }}>
-                    {item.email}
-                  </div>
-                )}
-                {item.lastAmount && (
-                  <div className="text-xs mt-1" style={{ color: colors.success }}>
-                    Dernier transfert : {item.lastAmount.toLocaleString('fr-FR')} Ar
-                  </div>
-                )}
-              </div>
-            </div>
-            <div className="flex gap-2 mt-3">
-              <button
-                onClick={() => onSend(item)}
-                className="flex-1 flex items-center justify-center gap-1.5 py-2 rounded-lg text-white text-xs font-semibold"
-                style={{ background: colors.primary }}
-              >
-                <Send size={14} />
-                Envoyer
-              </button>
-              <button
-                onClick={() => onEdit(item)}
-                className="w-10 h-9 rounded-lg flex items-center justify-center"
-                style={{ background: `${colors.textSecondary}20`, color: colors.text }}
-              >
-                <Pencil size={16} />
-              </button>
-              <button
-                onClick={() => onDelete(item.id)}
-                className="w-10 h-9 rounded-lg flex items-center justify-center"
-                style={{ background: `${colors.error}20`, color: colors.error }}
-              >
-                <Trash2 size={16} />
-              </button>
-            </div>
+              </>
+            )}
           </div>
-        ))}
+        </div>
       </div>
-    </section>
+
+      {/* Info */}
+      <div className="min-w-0 mb-3">
+        <div className="text-sm font-bold truncate">{b.name}</div>
+        <div className="text-xs text-ink-muted truncate flex items-center gap-1.5 mt-1">
+          <Phone size={11} />
+          {formatPhone(b.phone)}
+        </div>
+        {b.email && (
+          <div className="text-xs text-ink-muted truncate flex items-center gap-1.5 mt-0.5">
+            <Mail size={11} />
+            {b.email}
+          </div>
+        )}
+        {b.lastAmount && (
+          <Badge tone="success" className="mt-2.5">
+            Dernier: {b.lastAmount.toLocaleString('fr-FR')} Ar
+          </Badge>
+        )}
+      </div>
+
+      {/* CTA */}
+      <Button variant="primary" size="sm" fullWidth icon={Send} onClick={onSend}>
+        Envoyer
+      </Button>
+    </Card>
   );
 }

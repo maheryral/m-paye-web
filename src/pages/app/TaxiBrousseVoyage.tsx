@@ -1,33 +1,40 @@
 import {
+  ArrowLeft,
   ArrowRight,
-  Building2,
+  Bus,
   Calendar,
-  Car,
   CheckCircle2,
   Clock,
   CreditCard,
-  Loader2,
-  MapPin,
+  Phone,
+  Star,
   User as UserIcon,
   Users,
   Wallet,
+  type LucideIcon,
 } from 'lucide-react';
 import { useCallback, useEffect, useState } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
-import GradientHeader from '../../components/GradientHeader';
 import { useLocale } from '../../contexts/LocaleContext';
-import { useColors } from '../../contexts/ThemeContext';
 import { useWallet } from '../../contexts/WalletContext';
 import {
   taxiBrousseApi,
   type SeatMap,
   type VoyageSearchResult,
 } from '../../services/taxiBrousseApi';
+import {
+  Badge,
+  Button,
+  Card,
+  PageHeader,
+  Skeleton,
+} from '../../ui';
+
+type PayMethod = 'wallet' | 'cash' | 'mobile_money';
 
 export default function TaxiBrousseVoyage() {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
-  const colors = useColors();
   const { balance, fetchBalance } = useWallet();
   const { formatCurrency } = useLocale();
 
@@ -35,9 +42,9 @@ export default function TaxiBrousseVoyage() {
   const [seatMap, setSeatMap] = useState<SeatMap | null>(null);
   const [loading, setLoading] = useState(true);
   const [selectedSeat, setSelectedSeat] = useState<number | null>(null);
-  const [paymentMode, setPaymentMode] = useState<'wallet' | 'cash' | 'mobile_money'>('wallet');
+  const [payMethod, setPayMethod] = useState<PayMethod>('wallet');
   const [submitting, setSubmitting] = useState(false);
-  const [success, setSuccess] = useState<{ confirmCode: string } | null>(null);
+  const [success, setSuccess] = useState<{ code: string } | null>(null);
 
   const load = useCallback(async () => {
     if (!id) return;
@@ -61,28 +68,17 @@ export default function TaxiBrousseVoyage() {
     void load();
   }, [load]);
 
-  const handleBook = async () => {
+  const book = async () => {
     if (!voyage || !selectedSeat) return;
-    if (paymentMode === 'wallet' && balance < voyage.prix) {
-      alert(`Solde insuffisant. ${formatCurrency(balance)} disponible.`);
-      return;
+    if (payMethod === 'wallet' && balance < voyage.prix) {
+      return alert(`Solde insuffisant — ${formatCurrency(balance)} disponible`);
     }
     setSubmitting(true);
     try {
-      // Create reservation
-      const res = await taxiBrousseApi.createReservation(
-        voyage.id,
-        selectedSeat,
-        voyage.prix,
-      );
-      // Immediate payment
-      if (paymentMode === 'wallet') {
-        await taxiBrousseApi.payReservation(res.data.id, 'wallet');
-        await fetchBalance();
-      } else {
-        await taxiBrousseApi.payReservation(res.data.id, paymentMode);
-      }
-      setSuccess({ confirmCode: res.data.codeConfirmation });
+      const r = await taxiBrousseApi.createReservation(voyage.id, selectedSeat, voyage.prix);
+      await taxiBrousseApi.payReservation(r.data.id, payMethod);
+      if (payMethod === 'wallet') await fetchBalance();
+      setSuccess({ code: r.data.codeConfirmation });
     } catch (e: any) {
       alert(e?.response?.data?.message || 'Réservation échouée');
     } finally {
@@ -92,10 +88,11 @@ export default function TaxiBrousseVoyage() {
 
   if (loading) {
     return (
-      <div className="min-h-screen bg-bg">
-        <GradientHeader title="Voyage" />
-        <div className="flex justify-center mt-20">
-          <Loader2 className="animate-spin" size={32} style={{ color: colors.primary }} />
+      <div className="space-y-6 animate-fade-in">
+        <PageHeader title="Détails du voyage" />
+        <div className="grid grid-cols-1 lg:grid-cols-3 gap-5">
+          <Skeleton className="h-96 rounded-2xl lg:col-span-2" />
+          <Skeleton className="h-96 rounded-2xl" />
         </div>
       </div>
     );
@@ -103,51 +100,46 @@ export default function TaxiBrousseVoyage() {
 
   if (success) {
     return (
-      <div className="min-h-screen bg-bg flex items-center justify-center p-5">
-        <div className="card max-w-md w-full p-8 text-center">
-          <div
-            className="w-20 h-20 mx-auto rounded-full flex items-center justify-center mb-4"
-            style={{ background: `${colors.success}20` }}
-          >
-            <CheckCircle2 size={56} style={{ color: colors.success }} />
+      <div className="animate-fade-in max-w-2xl mx-auto">
+        <Card padding="lg" className="text-center">
+          <div className="w-24 h-24 mx-auto rounded-full bg-success-bg flex items-center justify-center mb-5">
+            <CheckCircle2 size={56} className="text-success-400" />
           </div>
-          <div className="text-2xl font-extrabold mb-2" style={{ color: colors.text }}>
-            Réservation confirmée !
-          </div>
-          <div className="text-sm mb-4" style={{ color: colors.textSecondary }}>
-            Place {selectedSeat} sur le voyage {voyage?.villeDepart} → {voyage?.villeArrivee}
-          </div>
-          <div
-            className="rounded-2xl p-4 mb-6"
-            style={{ background: colors.background }}
-          >
-            <div className="text-xs" style={{ color: colors.textSecondary }}>
-              Code de confirmation
+          <h2 className="text-2xl font-bold mb-2">Réservation confirmée !</h2>
+          <p className="text-sm text-ink-muted mb-5">
+            Place <span className="text-brand-300 font-bold">n°{selectedSeat}</span> sur le
+            voyage {voyage?.villeDepart} → {voyage?.villeArrivee}
+          </p>
+
+          <div className="rounded-2xl bg-gradient-brand-soft border border-brand-500/30 p-5 mb-6">
+            <div className="text-xs text-ink-muted">Code de confirmation</div>
+            <div className="text-3xl font-mono font-bold tracking-widest text-brand-300 mt-2">
+              {success.code}
             </div>
-            <div
-              className="text-xl font-mono font-extrabold mt-1 tracking-wider"
-              style={{ color: colors.primary }}
-            >
-              {success.confirmCode}
+            <div className="text-[11px] text-ink-dim mt-2">
+              Présentez ce code au chauffeur le jour du départ
             </div>
           </div>
+
           <div className="flex gap-2">
-            <button
-              onClick={() => navigate('/taxi-brousse/reservations')}
-              className="flex-1 py-3 rounded-xl font-bold text-white"
-              style={{ background: colors.primary }}
-            >
-              Mes réservations
-            </button>
-            <button
+            <Button
+              variant="secondary"
+              size="md"
+              fullWidth
               onClick={() => navigate('/taxi-brousse')}
-              className="flex-1 py-3 rounded-xl font-semibold border"
-              style={{ borderColor: colors.border, color: colors.text }}
             >
               Nouvelle recherche
-            </button>
+            </Button>
+            <Button
+              variant="primary"
+              size="md"
+              fullWidth
+              onClick={() => navigate('/taxi-brousse/reservations')}
+            >
+              Mes réservations
+            </Button>
           </div>
-        </div>
+        </Card>
       </div>
     );
   }
@@ -155,360 +147,375 @@ export default function TaxiBrousseVoyage() {
   if (!voyage) return null;
 
   return (
-    <div className="min-h-screen bg-bg pb-8">
-      <div className="max-w-3xl mx-auto">
-        <GradientHeader
-          title="Détails du voyage"
-          subtitle={`${voyage.villeDepart} → ${voyage.villeArrivee}`}
-        />
+    <div className="space-y-6 animate-fade-in">
+      <PageHeader
+        title={`${voyage.villeDepart} → ${voyage.villeArrivee}`}
+        subtitle="Sélectionnez votre place et confirmez votre réservation"
+        actions={
+          <Button
+            variant="ghost"
+            size="sm"
+            icon={ArrowLeft}
+            onClick={() => navigate('/taxi-brousse')}
+          >
+            Retour aux résultats
+          </Button>
+        }
+      />
 
-        <div className="px-5 mt-4 space-y-5">
-          {/* Récap voyage */}
-          <div className="card p-4 space-y-3">
-            <div className="flex items-center gap-3">
-              <span
-                className="text-xs font-bold px-2 py-1 rounded-full uppercase"
-                style={{ background: `${colors.primary}20`, color: colors.primary }}
-              >
-                {voyage.classe?.type || 'Standard'}
+      <div className="grid grid-cols-1 lg:grid-cols-3 gap-5">
+        {/* === Main (2/3) === */}
+        <div className="lg:col-span-2 space-y-5">
+          {/* Itinerary */}
+          <Card padding="md">
+            <div className="flex items-center gap-3 mb-4">
+              <div className="w-11 h-11 rounded-xl bg-gradient-brand flex items-center justify-center text-white">
+                <Bus size={18} />
+              </div>
+              <div>
+                <h3 className="text-base font-bold">Itinéraire</h3>
+                <p className="text-xs text-ink-muted">
+                  {voyage.cooperative?.nom} · {voyage.classe?.type}
+                </p>
+              </div>
+            </div>
+
+            <div className="grid grid-cols-3 gap-3 items-center pt-4 border-t border-bg-border">
+              {/* Departure */}
+              <div className="text-center">
+                <div className="text-3xl font-bold tracking-tight">
+                  {voyage.heureDepart}
+                </div>
+                <div className="text-xs text-ink-muted mt-1 font-semibold">
+                  {voyage.villeDepart}
+                </div>
+                <div className="text-[10px] text-ink-dim mt-0.5 truncate">
+                  {voyage.localisationDepart}
+                </div>
+              </div>
+
+              {/* Connector */}
+              <div className="flex items-center gap-2">
+                <div className="w-2 h-2 rounded-full bg-brand-300 shrink-0" />
+                <div className="flex-1 h-0.5 border-t-2 border-dashed border-bg-border relative">
+                  {voyage.dureeEstimee && (
+                    <Badge
+                      tone="brand"
+                      className="absolute left-1/2 -translate-x-1/2 -top-3 whitespace-nowrap"
+                    >
+                      <Clock size={9} className="mr-0.5" />
+                      {voyage.dureeEstimee}
+                    </Badge>
+                  )}
+                </div>
+                <div className="w-2 h-2 rounded-full bg-cyan-400 shrink-0" />
+              </div>
+
+              {/* Arrival */}
+              <div className="text-center">
+                <div className="text-3xl font-bold tracking-tight">
+                  {voyage.heureArrivee}
+                </div>
+                <div className="text-xs text-ink-muted mt-1 font-semibold">
+                  {voyage.villeArrivee}
+                </div>
+                <div className="text-[10px] text-ink-dim mt-0.5 truncate">
+                  {voyage.localisationArrivee}
+                </div>
+              </div>
+            </div>
+
+            <div className="flex items-center justify-center gap-2 mt-4 text-xs text-ink-muted">
+              <Calendar size={12} />
+              <span>
+                {new Date(voyage.dateDepart).toLocaleDateString('fr-FR', {
+                  weekday: 'long',
+                  day: 'numeric',
+                  month: 'long',
+                  year: 'numeric',
+                })}
               </span>
-              {voyage.cooperative?.nom && (
-                <span className="text-xs flex items-center gap-1" style={{ color: colors.textSecondary }}>
-                  <Building2 size={12} />
-                  {voyage.cooperative.nom}
-                </span>
-              )}
             </div>
+          </Card>
 
-            <div className="flex items-stretch gap-3">
-              <div className="flex flex-col items-center pt-1">
-                <MapPin size={16} style={{ color: colors.primary }} />
-                <div className="flex-1 w-px my-1" style={{ background: colors.border }} />
-                <MapPin size={16} style={{ color: '#10b981' }} />
-              </div>
-              <div className="flex-1 space-y-3">
-                <div>
-                  <div className="text-sm font-semibold" style={{ color: colors.text }}>
-                    {voyage.villeDepart}
-                  </div>
-                  <div className="text-xs" style={{ color: colors.textSecondary }}>
-                    {voyage.localisationDepart}
-                  </div>
-                  <div className="text-xs mt-1 flex items-center gap-1" style={{ color: colors.textSecondary }}>
-                    <Clock size={12} />
-                    {new Date(voyage.dateDepart).toLocaleDateString('fr-FR', {
-                      weekday: 'long',
-                      day: '2-digit',
-                      month: 'long',
-                    })}{' '}
-                    · {voyage.heureDepart}
-                  </div>
-                </div>
-                <div>
-                  <div className="text-sm font-semibold" style={{ color: colors.text }}>
-                    {voyage.villeArrivee}
-                  </div>
-                  <div className="text-xs" style={{ color: colors.textSecondary }}>
-                    {voyage.localisationArrivee}
-                  </div>
-                  <div className="text-xs mt-1 flex items-center gap-1" style={{ color: colors.textSecondary }}>
-                    <Clock size={12} />
-                    {new Date(voyage.dateArrivee).toLocaleDateString('fr-FR', {
-                      weekday: 'long',
-                      day: '2-digit',
-                      month: 'long',
-                    })}{' '}
-                    · {voyage.heureArrivee}
-                  </div>
-                </div>
-              </div>
-            </div>
-
-            <div className="grid grid-cols-2 gap-3 pt-2 border-t" style={{ borderColor: colors.border }}>
-              <InfoRow
-                icon={Car}
-                label="Véhicule"
-                value={`${voyage.voiture.marque || ''} ${voyage.voiture.modele || ''}`.trim() || voyage.voiture.matricule}
-                sub={voyage.voiture.matricule}
-                colors={colors}
+          {/* Vehicle info */}
+          <Card padding="md">
+            <h3 className="text-base font-bold mb-4">Véhicule & équipage</h3>
+            <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+              <InfoTile
+                icon={Bus}
+                label="Modèle"
+                value={`${voyage.voiture?.marque || ''} ${voyage.voiture?.modele || ''}`.trim() || '—'}
+                sub={voyage.voiture?.matricule}
               />
-              <InfoRow
+              <InfoTile
                 icon={Users}
                 label="Capacité"
-                value={`${voyage.voiture.capacite} places`}
+                value={`${voyage.voiture?.capacite || 0} places`}
                 sub={
                   voyage.placesDisponibles
                     ? `${voyage.placesDisponibles.placeLibre} libres`
                     : undefined
                 }
-                colors={colors}
               />
               {voyage.chauffeur && (
-                <InfoRow
+                <InfoTile
                   icon={UserIcon}
                   label="Chauffeur"
                   value={`${voyage.chauffeur.prenom} ${voyage.chauffeur.nom}`}
-                  colors={colors}
                 />
               )}
-              {voyage.dureeEstimee && (
-                <InfoRow
-                  icon={Clock}
-                  label="Durée estimée"
-                  value={voyage.dureeEstimee}
-                  colors={colors}
+              {voyage.cooperative?.telephone && (
+                <InfoTile
+                  icon={Phone}
+                  label="Contact"
+                  value={voyage.cooperative.telephone}
                 />
               )}
             </div>
-          </div>
+          </Card>
 
           {/* Seat picker */}
           {seatMap && (
-            <section>
-              <h3 className="text-sm font-bold mb-3" style={{ color: colors.text }}>
-                Choisissez votre place
-              </h3>
-              <div className="card p-4">
-                <div className="flex items-center justify-center gap-4 mb-4 text-[11px]">
-                  <Legend color={colors.primary} label="Sélectionnée" />
-                  <Legend color={colors.border} label="Libre" border />
-                  <Legend color={colors.error} label="Réservée" />
-                </div>
+            <Card padding="md">
+              <div className="flex items-center justify-between mb-4">
+                <h3 className="text-base font-bold">Choisissez votre place</h3>
+                <span className="text-xs text-ink-muted">
+                  {seatMap.availableCount}/{seatMap.capacity} libres
+                </span>
+              </div>
 
-                {/* Chauffeur indicator */}
-                <div
-                  className="flex justify-end mb-3 pb-3 border-b"
-                  style={{ borderColor: colors.border }}
-                >
-                  <div
-                    className="flex items-center gap-1.5 px-3 py-1 rounded-lg text-[11px] font-semibold"
-                    style={{
-                      background: `${colors.textSecondary}15`,
-                      color: colors.textSecondary,
-                    }}
-                  >
-                    <UserIcon size={12} />
+              {/* Legend */}
+              <div className="flex items-center justify-center gap-4 mb-5 text-[11px]">
+                <Legend label="Sélectionnée" colorClass="bg-brand-500" />
+                <Legend label="Libre" border />
+                <Legend label="Réservée" colorClass="bg-danger-500/30 border border-danger-500" />
+              </div>
+
+              {/* Bus body visualization */}
+              <div className="max-w-md mx-auto">
+                {/* Driver hint */}
+                <div className="flex justify-end mb-3">
+                  <div className="flex items-center gap-1.5 px-3 py-1 rounded-lg bg-bg-elevated text-ink-muted text-[10px] font-semibold">
+                    <UserIcon size={11} />
                     Chauffeur
                   </div>
                 </div>
 
-                {/* Seats grid - 4 cols typical for taxi-brousse */}
-                <div className="grid grid-cols-4 gap-2 max-w-sm mx-auto">
-                  {seatMap.seats.map((seat) => {
-                    const isSelected = selectedSeat === seat.numPlace;
-                    const isReserved = seat.isReserved;
-                    return (
-                      <button
-                        key={seat.numPlace}
-                        disabled={isReserved}
-                        onClick={() => setSelectedSeat(seat.numPlace)}
-                        className="aspect-square rounded-xl border-2 flex items-center justify-center text-sm font-bold transition-all"
-                        style={{
-                          background: isReserved
-                            ? `${colors.error}30`
-                            : isSelected
-                              ? colors.primary
-                              : 'transparent',
-                          borderColor: isReserved
-                            ? colors.error
-                            : isSelected
-                              ? colors.primary
-                              : colors.border,
-                          color: isReserved
-                            ? colors.error
-                            : isSelected
-                              ? '#fff'
-                              : colors.text,
-                          cursor: isReserved ? 'not-allowed' : 'pointer',
-                          opacity: isReserved ? 0.6 : 1,
-                        }}
-                      >
-                        {seat.numPlace}
-                      </button>
-                    );
-                  })}
-                </div>
-
-                <div className="flex justify-center gap-4 mt-4 text-xs" style={{ color: colors.textSecondary }}>
-                  <span>
-                    {seatMap.availableCount}/{seatMap.capacity} libres
-                  </span>
+                {/* Seats grid */}
+                <div className="p-4 rounded-2xl border-2 border-bg-border bg-bg-elevated/30">
+                  <div className="grid grid-cols-4 gap-2">
+                    {seatMap.seats.map((seat) => {
+                      const isSelected = selectedSeat === seat.numPlace;
+                      const isReserved = seat.isReserved;
+                      return (
+                        <button
+                          key={seat.numPlace}
+                          disabled={isReserved}
+                          onClick={() => setSelectedSeat(seat.numPlace)}
+                          className={`aspect-square rounded-xl border-2 flex items-center justify-center text-sm font-bold transition-all ${
+                            isReserved
+                              ? 'bg-danger-500/20 border-danger-500/50 text-danger-400 opacity-60 cursor-not-allowed'
+                              : isSelected
+                                ? 'bg-gradient-brand border-brand-500 text-white shadow-glow-soft scale-105'
+                                : 'border-bg-border bg-bg-surface text-ink hover:border-brand-500 hover:scale-105'
+                          }`}
+                        >
+                          {seat.numPlace}
+                        </button>
+                      );
+                    })}
+                  </div>
                 </div>
               </div>
-            </section>
+            </Card>
           )}
 
-          {/* Payment + Book */}
-          <section>
-            <h3 className="text-sm font-bold mb-3" style={{ color: colors.text }}>
-              Mode de paiement
-            </h3>
+          {/* Payment */}
+          <Card padding="md">
+            <h3 className="text-base font-bold mb-4">Mode de paiement</h3>
             <div className="space-y-2">
-              <PaymentOption
+              <PayOption
                 id="wallet"
                 title="Wallet M'Paye"
                 description={`Solde : ${formatCurrency(balance)}`}
                 icon={Wallet}
-                selected={paymentMode === 'wallet'}
-                onSelect={() => setPaymentMode('wallet')}
-                colors={colors}
+                selected={payMethod === 'wallet'}
+                onSelect={() => setPayMethod('wallet')}
               />
-              <PaymentOption
+              <PayOption
                 id="mobile_money"
                 title="Mobile Money"
                 description="MVola, Orange Money, Airtel"
                 icon={CreditCard}
-                selected={paymentMode === 'mobile_money'}
-                onSelect={() => setPaymentMode('mobile_money')}
-                colors={colors}
+                selected={payMethod === 'mobile_money'}
+                onSelect={() => setPayMethod('mobile_money')}
               />
-              <PaymentOption
+              <PayOption
                 id="cash"
-                title="Espèces"
-                description="Paiement à bord"
+                title="Espèces à bord"
+                description="Payez directement au chauffeur"
                 icon={Wallet}
-                selected={paymentMode === 'cash'}
-                onSelect={() => setPaymentMode('cash')}
-                colors={colors}
+                selected={payMethod === 'cash'}
+                onSelect={() => setPayMethod('cash')}
               />
             </div>
-          </section>
+          </Card>
+        </div>
 
-          {/* Sticky CTA */}
-          <div className="card p-4 sticky bottom-3">
-            <div className="flex items-center justify-between mb-3">
-              <div>
-                <div className="text-xs" style={{ color: colors.textSecondary }}>
-                  Total
+        {/* === Booking summary (1/3, sticky) === */}
+        <div className="lg:sticky lg:top-20 lg:self-start">
+          <Card padding="md">
+            <h3 className="text-sm font-bold mb-4">Récapitulatif</h3>
+
+            <div className="space-y-3 mb-5 pb-5 border-b border-bg-border">
+              <Row label="Trajet">
+                <div className="flex items-center gap-1 text-xs">
+                  <span className="font-semibold">{voyage.villeDepart}</span>
+                  <ArrowRight size={11} className="text-ink-dim" />
+                  <span className="font-semibold">{voyage.villeArrivee}</span>
                 </div>
-                <div className="text-2xl font-extrabold" style={{ color: colors.text }}>
-                  {formatCurrency(voyage.prix)}
-                </div>
-              </div>
-              <div className="text-right">
-                <div className="text-xs" style={{ color: colors.textSecondary }}>
-                  Place
-                </div>
-                <div className="text-lg font-bold" style={{ color: colors.primary }}>
-                  {selectedSeat ? `n°${selectedSeat}` : '—'}
-                </div>
-              </div>
+              </Row>
+              <Row label="Classe">
+                <Badge tone="brand">{voyage.classe?.type || 'Standard'}</Badge>
+              </Row>
+              <Row label="Place">
+                {selectedSeat ? (
+                  <Badge tone="success">n°{selectedSeat}</Badge>
+                ) : (
+                  <span className="text-xs text-ink-dim italic">À choisir</span>
+                )}
+              </Row>
+              <Row label="Paiement">
+                <span className="text-xs font-semibold capitalize">
+                  {payMethod === 'wallet' ? 'Wallet' : payMethod === 'mobile_money' ? 'Mobile Money' : 'Espèces'}
+                </span>
+              </Row>
             </div>
-            <button
-              onClick={handleBook}
-              disabled={!selectedSeat || submitting}
-              className="w-full flex items-center justify-center gap-2 py-3 rounded-xl font-bold text-white"
-              style={{
-                background: selectedSeat ? colors.primary : '#475569',
-                opacity: submitting ? 0.7 : 1,
-              }}
+
+            <div className="flex items-baseline justify-between mb-1">
+              <span className="text-xs text-ink-muted">Total à payer</span>
+              <span className="text-3xl font-bold tracking-tight">
+                {Number(voyage.prix).toLocaleString('fr-FR')}{' '}
+                <span className="text-base font-semibold">Ar</span>
+              </span>
+            </div>
+            <div className="text-[10px] text-ink-dim mb-5">Sans frais additionnels</div>
+
+            <Button
+              variant="primary"
+              size="lg"
+              fullWidth
+              loading={submitting}
+              disabled={!selectedSeat}
+              icon={Star}
+              onClick={book}
             >
-              {submitting ? (
-                <Loader2 className="animate-spin" size={20} />
-              ) : (
-                <>
-                  Réserver et payer
-                  <ArrowRight size={18} />
-                </>
-              )}
-            </button>
-          </div>
+              {selectedSeat ? `Réserver place ${selectedSeat}` : 'Choisir une place'}
+            </Button>
+
+            <div className="text-[10px] text-ink-dim text-center mt-3">
+              Annulation possible jusqu'à 24h avant le départ
+            </div>
+          </Card>
         </div>
       </div>
     </div>
   );
 }
 
-function InfoRow({
+function InfoTile({
   icon: Icon,
   label,
   value,
   sub,
-  colors,
 }: {
-  icon: any;
+  icon: LucideIcon;
   label: string;
   value: string;
   sub?: string;
-  colors: any;
 }) {
   return (
-    <div className="flex items-start gap-2">
-      <Icon size={16} className="mt-0.5 shrink-0" style={{ color: colors.primary }} />
-      <div className="min-w-0">
-        <div className="text-[11px]" style={{ color: colors.textSecondary }}>
+    <div className="p-3 rounded-xl bg-bg-elevated/50 border border-bg-border">
+      <div className="flex items-center gap-1.5 mb-1.5">
+        <Icon size={12} className="text-brand-300" />
+        <span className="text-[10px] text-ink-dim uppercase tracking-wider font-bold">
           {label}
-        </div>
-        <div className="text-sm font-semibold truncate" style={{ color: colors.text }}>
-          {value}
-        </div>
-        {sub && (
-          <div className="text-[11px]" style={{ color: colors.textSecondary }}>
-            {sub}
-          </div>
-        )}
+        </span>
       </div>
+      <div className="text-sm font-semibold truncate">{value}</div>
+      {sub && <div className="text-[10px] text-ink-muted mt-0.5 truncate">{sub}</div>}
     </div>
   );
 }
 
-function Legend({ color, label, border }: { color: string; label: string; border?: boolean }) {
+function Legend({
+  label,
+  colorClass,
+  border,
+}: {
+  label: string;
+  colorClass?: string;
+  border?: boolean;
+}) {
   return (
     <div className="flex items-center gap-1.5">
       <div
-        className="w-3 h-3 rounded"
-        style={
-          border
-            ? { borderColor: color, borderWidth: 2 }
-            : { background: color }
-        }
+        className={`w-3 h-3 rounded ${
+          border ? 'border-2 border-bg-border' : colorClass
+        }`}
       />
-      <span className="text-slate-400">{label}</span>
+      <span className="text-ink-muted">{label}</span>
     </div>
   );
 }
 
-function PaymentOption({
+function PayOption({
   id,
   title,
   description,
   icon: Icon,
   selected,
   onSelect,
-  colors,
 }: {
   id: string;
   title: string;
   description: string;
-  icon: any;
+  icon: LucideIcon;
   selected: boolean;
   onSelect: () => void;
-  colors: any;
 }) {
   return (
     <button
       onClick={onSelect}
-      className="w-full card flex items-center gap-3 p-3.5 text-left transition-all"
-      style={{
-        borderColor: selected ? colors.primary : undefined,
-        borderWidth: selected ? 2 : 1,
-      }}
+      data-id={id}
+      className={`w-full flex items-center gap-3 p-3.5 rounded-xl border transition-all text-left ${
+        selected
+          ? 'border-brand-500 bg-brand-500/10'
+          : 'border-bg-border bg-bg-elevated/40 hover:border-ink-dim'
+      }`}
     >
       <div
-        className="w-10 h-10 rounded-xl flex items-center justify-center shrink-0"
-        style={{ background: selected ? colors.primary : `${colors.primary}20` }}
+        className={`w-10 h-10 rounded-xl flex items-center justify-center shrink-0 ${
+          selected ? 'bg-gradient-brand text-white' : 'bg-bg-elevated text-brand-300'
+        }`}
       >
-        <Icon size={20} style={{ color: selected ? '#fff' : colors.primary }} />
+        <Icon size={16} />
       </div>
       <div className="flex-1 min-w-0">
-        <div className="text-sm font-bold" style={{ color: colors.text }}>
-          {title}
-        </div>
-        <div className="text-xs" style={{ color: colors.textSecondary }}>
-          {description}
-        </div>
+        <div className="text-sm font-bold">{title}</div>
+        <div className="text-xs text-ink-muted mt-0.5">{description}</div>
       </div>
-      {selected && <CheckCircle2 size={20} style={{ color: colors.primary }} />}
+      {selected && <CheckCircle2 size={18} className="text-brand-300" />}
     </button>
+  );
+}
+
+function Row({ label, children }: { label: string; children: React.ReactNode }) {
+  return (
+    <div className="flex items-center justify-between gap-2">
+      <span className="text-xs text-ink-muted">{label}</span>
+      <span className="text-right">{children}</span>
+    </div>
   );
 }

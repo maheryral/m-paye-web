@@ -1,19 +1,17 @@
 import {
   ArrowLeft,
-  ArrowRight,
   CheckCircle2,
-  ChevronLeft,
-  Loader2,
   Mail,
   Phone,
   UserPlus,
-  Wallet,
 } from 'lucide-react';
 import { useEffect, useRef, useState } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { Link, useNavigate } from 'react-router-dom';
+import AuthLayout from '../../components/AuthLayout';
 import ErrorModal from '../../components/ErrorModal';
 import { useAuth } from '../../contexts/AuthContext';
 import { authService } from '../../services/api';
+import { Button, Input } from '../../ui';
 
 type Step = 'identifier' | 'otp';
 type Mode = 'phone' | 'email';
@@ -24,101 +22,94 @@ export default function Register() {
 
   const [step, setStep] = useState<Step>('identifier');
   const [mode, setMode] = useState<Mode>('phone');
-  const [phoneNumber, setPhoneNumber] = useState('');
+  const [phone, setPhone] = useState('');
   const [email, setEmail] = useState('');
   const [identifier, setIdentifier] = useState('');
-  const [otpCode, setOtpCode] = useState<string[]>(['', '', '', '', '', '']);
+  const [otp, setOtp] = useState<string[]>(['', '', '', '', '', '']);
   const [loading, setLoading] = useState(false);
   const [timer, setTimer] = useState(60);
   const [canResend, setCanResend] = useState(false);
-
-  const [showError, setShowError] = useState(false);
+  const [errorOpen, setErrorOpen] = useState(false);
   const [errorMsg, setErrorMsg] = useState('');
-  const [showSuccess, setShowSuccess] = useState(false);
+  const [success, setSuccess] = useState(false);
   const otpRefs = useRef<(HTMLInputElement | null)[]>([]);
 
-  const triggerError = (msg: string) => {
+  const fail = (msg: string) => {
     setErrorMsg(msg);
-    setShowError(true);
+    setErrorOpen(true);
   };
-
-  const getFullPhoneNumber = () => {
-    const clean = phoneNumber.replace(/\s/g, '');
-    return clean.startsWith('+') ? clean : `+261${clean}`;
+  const fullPhone = () => {
+    const c = phone.replace(/\s/g, '');
+    return c.startsWith('+') ? c : `+261${c}`;
   };
-
-  const formatPhone = (text: string) => {
-    let cleaned = text.replace(/\D/g, '').slice(0, 10);
-    if (cleaned.length > 2) {
-      return `${cleaned.slice(0, 2)} ${cleaned.slice(2, 4)} ${cleaned.slice(4, 6)} ${cleaned.slice(6, 8)} ${cleaned.slice(8, 10)}`.trim();
-    }
-    return cleaned;
+  const formatPhone = (v: string) => {
+    let c = v.replace(/\D/g, '').slice(0, 10);
+    if (c.length > 2)
+      return `${c.slice(0, 2)} ${c.slice(2, 4)} ${c.slice(4, 6)} ${c.slice(6, 8)} ${c.slice(8, 10)}`.trim();
+    return c;
   };
 
   const startTimer = () => {
     setTimer(60);
     setCanResend(false);
-    const interval = setInterval(() => {
-      setTimer((prev) => {
-        if (prev <= 1) {
-          clearInterval(interval);
+    const id = setInterval(() => {
+      setTimer((p) => {
+        if (p <= 1) {
+          clearInterval(id);
           setCanResend(true);
           return 0;
         }
-        return prev - 1;
+        return p - 1;
       });
     }, 1000);
   };
 
   useEffect(() => {
-    if (step === 'otp') startTimer();
+    if (step === 'otp') {
+      startTimer();
+      otpRefs.current[0]?.focus();
+    }
   }, [step]);
 
-  const handleSendIdentifier = async () => {
-    const value = mode === 'phone' ? getFullPhoneNumber() : email;
-    if (mode === 'phone' && phoneNumber.length < 9) {
-      triggerError('Numéro de téléphone invalide');
-      return;
-    }
-    if (mode === 'email' && (!email.includes('@') || !email.includes('.'))) {
-      triggerError('Email invalide');
-      return;
-    }
+  const sendIdentifier = async (e?: React.FormEvent) => {
+    e?.preventDefault();
+    const value = mode === 'phone' ? fullPhone() : email;
+    if (mode === 'phone' && phone.length < 9) return fail('Numéro invalide');
+    if (mode === 'email' && (!email.includes('@') || !email.includes('.')))
+      return fail('Email invalide');
     setLoading(true);
     try {
-      const data = mode === 'phone' ? { telephone: value } : { email: value };
-      const response = await authService.initiateRegistration(data);
-      setIdentifier(response.identifier);
+      const r = await authService.initiateRegistration(
+        mode === 'phone' ? { telephone: value } : { email: value },
+      );
+      setIdentifier(r.identifier);
       setStep('otp');
     } catch (e: any) {
-      triggerError(e?.response?.data?.message || "Erreur lors de l'envoi");
+      fail(e?.response?.data?.message || "Erreur lors de l'envoi");
     } finally {
       setLoading(false);
     }
   };
 
-  const handleVerifyOTP = async () => {
-    const code = otpCode.join('');
-    if (code.length !== 6) {
-      triggerError('Veuillez entrer le code à 6 chiffres');
-      return;
-    }
+  const verifyOTP = async () => {
+    const code = otp.join('');
+    if (code.length !== 6) return fail('Code à 6 chiffres requis');
     setLoading(true);
     try {
-      const response = await authService.verifyRegistration({ code, identifier });
-      await setUserFromTokens(response.accessToken, response.refreshToken, response.user);
-      setShowSuccess(true);
+      const r = await authService.verifyRegistration({ code, identifier });
+      await setUserFromTokens(r.accessToken, r.refreshToken, r.user);
+      setSuccess(true);
       setTimeout(() => navigate('/dashboard', { replace: true }), 1200);
     } catch (e: any) {
-      triggerError(e?.response?.data?.message || 'Code invalide');
+      fail(e?.response?.data?.message || 'Code invalide');
     } finally {
       setLoading(false);
     }
   };
 
-  const handleResendCode = async () => {
+  const handleResend = async () => {
     if (!canResend) return;
-    const value = mode === 'phone' ? getFullPhoneNumber() : email;
+    const value = mode === 'phone' ? fullPhone() : email;
     setLoading(true);
     try {
       await authService.initiateRegistration({
@@ -126,217 +117,202 @@ export default function Register() {
       } as any);
       startTimer();
     } catch {
-      triggerError('Erreur lors du renvoi');
+      fail('Erreur lors du renvoi');
     } finally {
       setLoading(false);
     }
   };
 
-  const handleOtpChange = (text: string, index: number) => {
-    const digit = text.replace(/\D/g, '').slice(-1);
-    const next = [...otpCode];
-    next[index] = digit;
-    setOtpCode(next);
-    if (digit && index < 5) otpRefs.current[index + 1]?.focus();
+  const onOtpChange = (val: string, idx: number) => {
+    const d = val.replace(/\D/g, '').slice(-1);
+    const next = [...otp];
+    next[idx] = d;
+    setOtp(next);
+    if (d && idx < 5) otpRefs.current[idx + 1]?.focus();
   };
-
-  const handleOtpKey = (e: React.KeyboardEvent<HTMLInputElement>, index: number) => {
-    if (e.key === 'Backspace' && !otpCode[index] && index > 0) {
-      otpRefs.current[index - 1]?.focus();
-    }
+  const onOtpKey = (e: React.KeyboardEvent<HTMLInputElement>, idx: number) => {
+    if (e.key === 'Backspace' && !otp[idx] && idx > 0) otpRefs.current[idx - 1]?.focus();
   };
-
-  const canSubmit = mode === 'phone' ? !!phoneNumber : !!email;
 
   return (
-    <div className="min-h-screen relative bg-bg text-white overflow-hidden">
-      <div className="absolute inset-x-0 top-0 h-[350px] bg-gradient-to-b from-[#1e3a8a33] to-transparent pointer-events-none" />
-      <div className="relative max-w-md mx-auto px-5 pt-14 pb-10">
-        <button
-          onClick={() => navigate(-1)}
-          className="w-10 h-10 rounded-full bg-white/10 flex items-center justify-center mb-5"
-        >
-          <ChevronLeft size={22} />
-        </button>
-
-        <div className="flex flex-col items-center mb-9">
-          <div className="w-22 h-22 rounded-3xl bg-gradient-primary p-5 flex items-center justify-center mb-4 shadow-glow-blue">
-            <Wallet size={42} className="text-white" />
-          </div>
-          <div className="text-3xl font-extrabold tracking-wide mb-1">M'Paye</div>
-          <div className="text-sm text-slate-400 font-medium">
-            {step === 'identifier' ? 'Créez votre compte' : 'Vérifiez votre code'}
-          </div>
-        </div>
-
-        {step === 'identifier' && (
+    <AuthLayout
+      title={step === 'identifier' ? 'Créer un compte' : 'Vérification'}
+      subtitle={
+        step === 'identifier'
+          ? "Rejoignez M'Paye en moins d'une minute"
+          : `Code envoyé à ${mode === 'phone' ? phone : email}`
+      }
+      footer={
+        step === 'identifier' ? (
           <>
-            <div className="flex gap-1 bg-bg-card border border-bg-border rounded-full p-1 mb-6">
-              <button
-                onClick={() => setMode('phone')}
-                className={`flex-1 flex items-center justify-center gap-2 py-2.5 rounded-full text-sm font-semibold transition-all ${
-                  mode === 'phone'
-                    ? 'bg-gradient-primary text-white shadow-glow-blue'
-                    : 'text-slate-400'
-                }`}
-              >
-                <Phone size={16} />
-                Téléphone
-              </button>
-              <button
-                onClick={() => setMode('email')}
-                className={`flex-1 flex items-center justify-center gap-2 py-2.5 rounded-full text-sm font-semibold transition-all ${
-                  mode === 'email'
-                    ? 'bg-gradient-primary text-white shadow-glow-blue'
-                    : 'text-slate-400'
-                }`}
-              >
-                <Mail size={16} />
-                E-mail
-              </button>
-            </div>
+            Déjà un compte ?{' '}
+            <Link to="/auth/login" className="text-brand-300 font-semibold hover:text-brand-200">
+              Se connecter
+            </Link>
+          </>
+        ) : null
+      }
+    >
+      {step === 'identifier' && (
+        <form onSubmit={sendIdentifier} className="space-y-4">
+          <div className="grid grid-cols-2 gap-1 p-1 bg-bg-elevated/50 rounded-xl border border-bg-border">
+            {[
+              { id: 'phone' as Mode, label: 'Téléphone', icon: Phone },
+              { id: 'email' as Mode, label: 'Email', icon: Mail },
+            ].map((t) => {
+              const Icon = t.icon;
+              const active = mode === t.id;
+              return (
+                <button
+                  type="button"
+                  key={t.id}
+                  onClick={() => setMode(t.id)}
+                  className={`flex items-center justify-center gap-2 py-2 rounded-lg text-sm font-semibold transition-all ${
+                    active
+                      ? 'bg-gradient-brand text-white shadow-glow-soft'
+                      : 'text-ink-muted hover:text-ink'
+                  }`}
+                >
+                  <Icon size={15} />
+                  {t.label}
+                </button>
+              );
+            })}
+          </div>
 
-            {mode === 'phone' ? (
-              <div className="flex items-center bg-bg-card border border-bg-border rounded-2xl overflow-hidden mb-4">
-                <div className="px-4 py-4 bg-primary/10 border-r border-bg-border">
-                  <span className="text-accent-violet font-bold">+261</span>
+          {mode === 'phone' ? (
+            <div>
+              <label className="label">Numéro de téléphone</label>
+              <div className="flex">
+                <div className="px-3 flex items-center bg-bg-elevated border border-bg-border border-r-0 rounded-l-xl text-brand-300 font-bold text-sm">
+                  +261
                 </div>
                 <input
                   type="tel"
-                  className="flex-1 bg-transparent px-4 py-4 text-white font-medium outline-none placeholder:text-slate-500"
-                  placeholder="32 12 345 67"
-                  value={phoneNumber}
-                  onChange={(e) => setPhoneNumber(formatPhone(e.target.value))}
                   inputMode="numeric"
+                  autoFocus
+                  placeholder="32 12 345 67"
+                  value={phone}
+                  onChange={(e) => setPhone(formatPhone(e.target.value))}
+                  className="input rounded-l-none flex-1"
                 />
               </div>
-            ) : (
-              <div className="flex items-center bg-bg-card border border-bg-border rounded-2xl px-4 mb-4">
-                <Mail size={20} className="text-slate-500 mr-2" />
-                <input
-                  type="email"
-                  className="flex-1 bg-transparent py-4 text-white font-medium outline-none placeholder:text-slate-500"
-                  placeholder="Adresse e-mail"
-                  value={email}
-                  onChange={(e) => setEmail(e.target.value.trim())}
-                />
-              </div>
-            )}
-
-            <button
-              onClick={handleSendIdentifier}
-              disabled={loading || !canSubmit}
-              className={`w-full flex items-center justify-center gap-2 py-4 rounded-2xl font-bold text-white transition-all ${
-                canSubmit ? 'bg-gradient-button shadow-glow-blue' : 'bg-slate-600'
-              } ${loading ? 'opacity-70' : ''}`}
-            >
-              {loading ? (
-                <Loader2 className="animate-spin" size={20} />
-              ) : (
-                <>
-                  <UserPlus size={18} />
-                  S'inscrire
-                  <ArrowRight size={18} />
-                </>
-              )}
-            </button>
-
-            <div className="flex justify-center items-center gap-3 mt-5 text-sm">
-              <span className="text-slate-400">Déjà un compte ?</span>
-              <button
-                className="text-accent-violet font-semibold"
-                onClick={() => navigate('/auth/login')}
-              >
-                Se connecter
-              </button>
             </div>
-          </>
-        )}
+          ) : (
+            <Input
+              label="Adresse email"
+              type="email"
+              icon={Mail}
+              autoComplete="email"
+              autoFocus
+              placeholder="nom@exemple.com"
+              value={email}
+              onChange={(e) => setEmail(e.target.value.trim())}
+            />
+          )}
 
-        {step === 'otp' && (
-          <>
-            <div className="text-xl font-extrabold text-center mb-2">Vérification</div>
-            <div className="text-sm text-slate-400 text-center mb-7">
-              Nous avons envoyé un code à
-              <br />
-              <span className="text-accent-violet font-bold">
-                {mode === 'phone' ? phoneNumber : email}
-              </span>
-            </div>
+          <Button
+            type="submit"
+            variant="primary"
+            size="lg"
+            fullWidth
+            loading={loading}
+            disabled={mode === 'phone' ? !phone : !email}
+            icon={UserPlus}
+          >
+            Créer mon compte
+          </Button>
 
-            <div className="flex justify-between gap-2 mb-6">
-              {otpCode.map((digit, index) => (
+          <p className="text-[11px] text-ink-dim text-center leading-relaxed">
+            En continuant, vous acceptez nos{' '}
+            <a className="text-brand-300 hover:underline" href="#">
+              conditions d'utilisation
+            </a>{' '}
+            et notre{' '}
+            <a className="text-brand-300 hover:underline" href="#">
+              politique de confidentialité
+            </a>
+            .
+          </p>
+        </form>
+      )}
+
+      {step === 'otp' && (
+        <div className="space-y-5">
+          <div>
+            <label className="label text-center">Code à 6 chiffres</label>
+            <div className="grid grid-cols-6 gap-2">
+              {otp.map((d, i) => (
                 <input
-                  key={index}
-                  ref={(el) => (otpRefs.current[index] = el)}
-                  value={digit}
-                  onChange={(e) => handleOtpChange(e.target.value, index)}
-                  onKeyDown={(e) => handleOtpKey(e, index)}
+                  key={i}
+                  ref={(el) => (otpRefs.current[i] = el)}
+                  value={d}
+                  onChange={(e) => onOtpChange(e.target.value, i)}
+                  onKeyDown={(e) => onOtpKey(e, i)}
                   inputMode="numeric"
                   maxLength={1}
-                  className="flex-1 h-14 bg-bg-card border border-bg-border rounded-2xl text-white text-2xl font-bold text-center outline-none focus:border-accent-violet"
+                  className="aspect-square text-center text-xl font-bold bg-bg-elevated border border-bg-border rounded-xl outline-none focus:border-brand-500 focus:ring-2 focus:ring-brand-500/20"
                 />
               ))}
             </div>
+          </div>
 
-            <div className="text-center mb-6">
-              {!canResend ? (
-                <span className="text-slate-400 text-sm">
-                  Renvoyer dans <span className="text-accent-violet font-bold">{timer}</span> secondes
-                </span>
-              ) : (
-                <button
-                  onClick={handleResendCode}
-                  className="text-accent-violet font-semibold text-sm"
-                >
-                  Renvoyer le code
-                </button>
-              )}
+          <div className="text-center text-xs">
+            {!canResend ? (
+              <span className="text-ink-muted">
+                Renvoyer dans{' '}
+                <span className="text-brand-300 font-bold">{timer}s</span>
+              </span>
+            ) : (
+              <button
+                type="button"
+                onClick={handleResend}
+                className="text-brand-300 font-semibold hover:text-brand-200"
+              >
+                Renvoyer le code
+              </button>
+            )}
+          </div>
+
+          <Button
+            variant="primary"
+            size="lg"
+            fullWidth
+            loading={loading}
+            disabled={otp.join('').length !== 6}
+            icon={CheckCircle2}
+            onClick={verifyOTP}
+          >
+            Créer mon compte
+          </Button>
+
+          <Button
+            variant="ghost"
+            size="sm"
+            icon={ArrowLeft}
+            onClick={() => setStep('identifier')}
+            className="mx-auto block"
+          >
+            Retour
+          </Button>
+        </div>
+      )}
+
+      <ErrorModal open={errorOpen} message={errorMsg} onClose={() => setErrorOpen(false)} />
+
+      {success && (
+        <div className="fixed inset-0 z-50 bg-black/70 backdrop-blur-sm flex items-center justify-center px-6">
+          <div className="card p-6 max-w-sm w-full text-center animate-slide-in">
+            <div className="w-16 h-16 mx-auto rounded-full bg-success-bg flex items-center justify-center mb-3">
+              <CheckCircle2 size={40} className="text-success-400" />
             </div>
-
-            <button
-              onClick={handleVerifyOTP}
-              disabled={loading || otpCode.join('').length !== 6}
-              className={`w-full flex items-center justify-center gap-2 py-4 rounded-2xl font-bold text-white transition-all ${
-                otpCode.join('').length === 6 ? 'bg-gradient-button shadow-glow-blue' : 'bg-slate-600'
-              } ${loading ? 'opacity-70' : ''}`}
-            >
-              {loading ? (
-                <Loader2 className="animate-spin" size={20} />
-              ) : (
-                <>
-                  <CheckCircle2 size={18} />
-                  Vérifier et créer le compte
-                </>
-              )}
-            </button>
-
-            <button
-              onClick={() => setStep('identifier')}
-              className="w-full flex items-center justify-center gap-2 mt-4 py-2.5 text-accent-violet text-sm font-semibold"
-            >
-              <ArrowLeft size={16} />
-              Retour
-            </button>
-          </>
-        )}
-      </div>
-
-      <ErrorModal open={showError} message={errorMsg} onClose={() => setShowError(false)} />
-
-      {showSuccess && (
-        <div className="fixed inset-0 z-50 bg-black/70 flex items-center justify-center px-6">
-          <div className="bg-bg-card rounded-3xl p-6 flex flex-col items-center gap-3 max-w-sm w-full shadow-2xl">
-            <div className="w-16 h-16 rounded-full bg-green-500/20 flex items-center justify-center">
-              <CheckCircle2 size={44} className="text-green-400" />
-            </div>
-            <div className="text-xl font-bold text-white">Compte créé !</div>
-            <div className="text-sm text-slate-400 text-center">
-              Bienvenue sur M'Paye. Redirection en cours...
+            <div className="text-lg font-bold">Compte créé !</div>
+            <div className="text-sm text-ink-muted mt-1">
+              Bienvenue sur M'Paye. Redirection...
             </div>
           </div>
         </div>
       )}
-    </div>
+    </AuthLayout>
   );
 }
