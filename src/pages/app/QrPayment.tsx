@@ -1,4 +1,5 @@
 import { Scanner, type IDetectedBarcode } from '@yudiel/react-qr-scanner';
+import jsQR from 'jsqr';
 import {
   AlertCircle,
   ArrowDownLeft,
@@ -7,6 +8,7 @@ import {
   CheckCircle2,
   Copy,
   Download,
+  ImageIcon,
   Mail,
   Phone,
   QrCode as QrCodeIcon,
@@ -23,7 +25,7 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import { useAuth } from '../../contexts/AuthContext';
 import { useLocale } from '../../contexts/LocaleContext';
 import { useWallet } from '../../contexts/WalletContext';
-import { transactionService } from '../../services/api';
+import { qrService, transactionService, type QrInfo } from '../../services/api';
 import { Avatar, Button, Card, PageHeader } from '../../ui';
 
 type Mode = 'scan' | 'mine';
@@ -46,11 +48,18 @@ export default function QrPayment() {
   const [scanned, setScanned] = useState<Scanned | null>(null);
   const [amount, setAmount] = useState('');
   const [paying, setPaying] = useState(false);
-  const [success, setSuccess] = useState<{ amt: number; to: string } | null>(null);
+  const [success, setSuccess] = useState<{ amt: number; to: string } | null>(
+    null,
+  );
   const [cameraError, setCameraError] = useState<string | null>(null);
   const [recent, setRecent] = useState<any[]>([]);
 
+  // QR marchand (Mode A/B) — preview avant /qr/pay
+  const [merchantQr, setMerchantQr] = useState<QrInfo | null>(null);
+  const [merchantQrLoading, setMerchantQrLoading] = useState(false);
+
   const qrRef = useRef<HTMLDivElement | null>(null);
+  const fileInputRef = useRef<HTMLInputElement | null>(null);
 
   const qrData = useMemo(
     () =>
@@ -81,13 +90,53 @@ export default function QrPayment() {
     }
   };
 
-  const handleScan = (detected: IDetectedBarcode[]) => {
-    if (!detected.length || !scanning) return;
-    const raw = detected[0].rawValue;
-    setScanning(false);
+  // Extrait une référence QR marchand (format QR-<ts>-<hex>, brut ou JSON)
+  const extractMerchantQrRef = (raw: string): string | null => {
+    const trimmed = raw.trim();
+    if (/^QR-\d+-[A-F0-9]+$/i.test(trimmed)) return trimmed;
+    try {
+      const j = JSON.parse(trimmed);
+      if (j?.type === 'qr_payment' && typeof j.reference === 'string') {
+        return j.reference;
+      }
+    } catch {
+      /* */
+    }
+    return null;
+  };
+
+  // Charge le récap d'un QR marchand pour preview
+  const loadMerchantQr = async (reference: string) => {
+    setMerchantQrLoading(true);
+    try {
+      const data = await qrService.info(reference);
+      if (data.statut !== 'PENDING') {
+        alert(`Ce QR est déjà ${String(data.statut).toLowerCase()}.`);
+        setScanning(true);
+        return;
+      }
+      setMerchantQr(data);
+    } catch (e: any) {
+      alert(e?.response?.data?.message || 'QR introuvable');
+      setScanning(true);
+    } finally {
+      setMerchantQrLoading(false);
+    }
+  };
+
+  // Route un payload scanné vers le bon flow (QR marchand, JSON p2p, email)
+  const processScanned = (raw: string) => {
+    const merchantRef = extractMerchantQrRef(raw);
+    if (merchantRef) {
+      void loadMerchantQr(merchantRef);
+      return;
+    }
     try {
       const parsed = JSON.parse(raw) as Scanned;
-      if (parsed.type === 'payment_request' && (parsed.email || parsed.telephone)) {
+      if (
+        parsed.type === 'payment_request' &&
+        (parsed.email || parsed.telephone)
+      ) {
         setScanned(parsed);
         if (parsed.amount) setAmount(String(parsed.amount));
         return;
@@ -96,11 +145,83 @@ export default function QrPayment() {
     } catch {
       if (raw.includes('@')) {
         setScanned({ email: raw, name: raw.split('@')[0] });
-      } else {
-        alert('QR non reconnu comme un code de paiement M\'Paye');
-        setScanning(true);
+        return;
       }
+      alert("QR non reconnu comme un code de paiement M'Paye");
+      setScanning(true);
     }
+  };
+
+  const handleScan = (detected: IDetectedBarcode[]) => {
+    if (!detected.length || !scanning) return;
+    setScanning(false);
+    processScanned(detected[0].rawValue);
+  };
+
+  // Upload d'une image → décodage QR via jsQR
+  const handleImageUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    e.target.value = ''; // permet de réuploader la même image
+    try {
+      const url = URL.createObjectURL(file);
+      const img = new Image();
+      img.src = url;
+      await new Promise<void>((res, rej) => {
+        img.onload = () => res();
+        img.onerror = () => rej(new Error('Image illisible'));
+      });
+      URL.revokeObjectURL(url);
+      const canvas = document.createElement('canvas');
+      canvas.width = img.width;
+      canvas.height = img.height;
+      const ctx = canvas.getContext('2d');
+      if (!ctx) return;
+      ctx.drawImage(img, 0, 0);
+      const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
+      const decoded = jsQR(imageData.data, imageData.width, imageData.height);
+      if (!decoded) {
+        alert("Aucun QR détecté dans l'image. Réessayez avec une photo plus nette.");
+        return;
+      }
+      setScanning(false);
+      processScanned(decoded.data);
+    } catch (err: any) {
+      alert(err?.message || "Impossible de lire l'image");
+    }
+  };
+
+  const confirmMerchantQrPayment = async () => {
+    if (!merchantQr) return;
+    if (Number(merchantQr.montant) > balance) {
+      alert('Solde insuffisant');
+      return;
+    }
+    setMerchantQrLoading(true);
+    try {
+      const idem = `qr-${merchantQr.reference}-${Date.now()}`;
+      await qrService.pay(merchantQr.reference, idem);
+      await fetchBalance();
+      await loadRecent();
+      setSuccess({
+        amt: Number(merchantQr.montant),
+        to: merchantQr.merchant.nom,
+      });
+      setMerchantQr(null);
+      setTimeout(() => {
+        setSuccess(null);
+        setScanning(true);
+      }, 2500);
+    } catch (e: any) {
+      alert(e?.response?.data?.message || 'Paiement refusé');
+    } finally {
+      setMerchantQrLoading(false);
+    }
+  };
+
+  const cancelMerchantQr = () => {
+    setMerchantQr(null);
+    setScanning(true);
   };
 
   const reset = () => {
@@ -221,7 +342,9 @@ export default function QrPayment() {
               <Card padding="md">
                 <div className="flex items-center gap-2 mb-3">
                   <Camera size={18} className="text-brand-300" />
-                  <h3 className="text-base font-bold">Pointez la caméra vers un QR M'Paye</h3>
+                  <h3 className="text-base font-bold">
+                    Pointez la caméra vers un QR M'Paye
+                  </h3>
                 </div>
                 <div className="relative aspect-square sm:aspect-video w-full rounded-2xl overflow-hidden bg-black max-w-2xl mx-auto">
                   {cameraError ? (
@@ -265,9 +388,27 @@ export default function QrPayment() {
                     </>
                   )}
                 </div>
-                <p className="text-xs text-ink-muted mt-3 text-center">
-                  La caméra démarrera après autorisation. Visez le QR du marchand ou d'un utilisateur.
-                </p>
+                <div className="flex items-center justify-between gap-3 mt-3 flex-wrap">
+                  <p className="text-xs text-ink-muted flex-1">
+                    La caméra démarrera après autorisation. Visez le QR du
+                    marchand ou d'un utilisateur.
+                  </p>
+                  <input
+                    ref={fileInputRef}
+                    type="file"
+                    accept="image/*"
+                    onChange={handleImageUpload}
+                    className="hidden"
+                  />
+                  <Button
+                    variant="secondary"
+                    size="sm"
+                    icon={ImageIcon}
+                    onClick={() => fileInputRef.current?.click()}
+                  >
+                    Importer une image
+                  </Button>
+                </div>
               </Card>
             ) : (
               <Card padding="md">
@@ -358,9 +499,12 @@ export default function QrPayment() {
               </div>
 
               <div className="flex items-center justify-center gap-2 mb-1">
-                <Avatar name={`${user?.prenom || ''} ${user?.nom || ''}`.trim() || user?.email} size="sm" />
+                <Avatar
+                  name={`${user?.prenom || ''} ${user?.nom || ''}`.trim() || user?.email}
+                  size="sm"
+                />
                 <div className="text-base font-bold">
-                  {user?.prenom ? `${user.prenom} ${user.nom || ''}`.trim() : "Mon profil"}
+                  {user?.prenom ? `${user.prenom} ${user.nom || ''}`.trim() : 'Mon profil'}
                 </div>
               </div>
               <div className="text-xs text-ink-muted mb-6">{user?.email}</div>
@@ -370,7 +514,8 @@ export default function QrPayment() {
               </div>
 
               <div className="text-xs text-ink-muted mt-5 max-w-xs mx-auto">
-                Faites scanner ce QR pour recevoir un paiement instantané, gratuit et sécurisé.
+                Faites scanner ce QR pour recevoir un paiement instantané,
+                gratuit et sécurisé.
               </div>
 
               <div className="flex flex-wrap gap-2 justify-center mt-5">
@@ -397,7 +542,9 @@ export default function QrPayment() {
               Solde
             </div>
             <div className="text-2xl font-bold">{formatCurrency(balance)}</div>
-            <div className="text-[11px] text-ink-dim mt-1">Disponible immédiatement</div>
+            <div className="text-[11px] text-ink-dim mt-1">
+              Disponible immédiatement
+            </div>
           </Card>
 
           {/* Tips */}
@@ -409,11 +556,14 @@ export default function QrPayment() {
             <ul className="space-y-2.5 text-xs text-ink-muted">
               {[
                 'Vérifiez toujours le nom du destinataire avant de payer.',
-                'M\'Paye ne demandera jamais votre mot de passe via QR.',
-                'Les QR code de paiement ne sont valables que pour des comptes M\'Paye.',
+                "M'Paye ne demandera jamais votre mot de passe via QR.",
+                "Les QR code de paiement ne sont valables que pour des comptes M'Paye.",
               ].map((t, i) => (
                 <li key={i} className="flex items-start gap-2">
-                  <CheckCircle2 size={12} className="text-success-400 mt-0.5 shrink-0" />
+                  <CheckCircle2
+                    size={12}
+                    className="text-success-400 mt-0.5 shrink-0"
+                  />
                   <span>{t}</span>
                 </li>
               ))}
@@ -434,7 +584,7 @@ export default function QrPayment() {
                 {recent.slice(0, 5).map((t: any) => {
                   const isPos = t.isCredit || t.type === 'DEPOSIT';
                   const counterpart =
-                    t.sender?.fullName || t.receiver?.fullName || 'M\'Paye';
+                    t.sender?.fullName || t.receiver?.fullName || "M'Paye";
                   return (
                     <div
                       key={t.id}
@@ -442,7 +592,9 @@ export default function QrPayment() {
                     >
                       <div
                         className={`w-8 h-8 rounded-lg flex items-center justify-center shrink-0 ${
-                          isPos ? 'bg-success-bg text-success-400' : 'bg-bg-elevated text-ink-muted'
+                          isPos
+                            ? 'bg-success-bg text-success-400'
+                            : 'bg-bg-elevated text-ink-muted'
                         }`}
                       >
                         {isPos ? (
@@ -452,7 +604,9 @@ export default function QrPayment() {
                         )}
                       </div>
                       <div className="flex-1 min-w-0">
-                        <div className="text-xs font-semibold truncate">{counterpart}</div>
+                        <div className="text-xs font-semibold truncate">
+                          {counterpart}
+                        </div>
                         <div className="text-[10px] text-ink-dim">
                           {new Date(t.createdAt).toLocaleTimeString('fr-FR', {
                             hour: '2-digit',
@@ -476,6 +630,101 @@ export default function QrPayment() {
           </Card>
         </div>
       </div>
+
+      {/* Modal confirmation paiement QR marchand (Mode A / B) */}
+      {merchantQr && (
+        <div className="fixed inset-0 z-50 bg-black/70 backdrop-blur-sm flex items-center justify-center p-4 animate-fade-in">
+          <Card padding="lg" className="max-w-md w-full animate-slide-in">
+            <div className="flex items-center gap-3 mb-4">
+              {merchantQr.mode === 'DIRECT_MOBILE' ? (
+                <Phone size={22} className="text-brand-300" />
+              ) : (
+                <Wallet size={22} className="text-brand-300" />
+              )}
+              <div className="text-base font-bold">Confirmer le paiement</div>
+            </div>
+
+            <div className="text-3xl font-extrabold text-center my-4">
+              {formatCurrency(Number(merchantQr.montant))} {merchantQr.devise}
+            </div>
+
+            <div className="border-t border-bg-border my-3" />
+
+            <div className="space-y-2 text-sm">
+              <div className="flex justify-between gap-3">
+                <span className="text-ink-muted">Bénéficiaire</span>
+                <span className="font-semibold truncate">
+                  {merchantQr.merchant.nom}
+                </span>
+              </div>
+              {merchantQr.mode === 'DIRECT_MOBILE' ? (
+                <>
+                  <div className="flex justify-between gap-3">
+                    <span className="text-ink-muted">Mode</span>
+                    <span className="font-semibold text-brand-300">
+                      {merchantQr.payoutOperatorLabel}
+                    </span>
+                  </div>
+                  <div className="flex justify-between gap-3">
+                    <span className="text-ink-muted">Numéro</span>
+                    <span className="font-semibold">
+                      {merchantQr.payoutPhoneMasked}
+                    </span>
+                  </div>
+                </>
+              ) : (
+                <div className="flex justify-between gap-3">
+                  <span className="text-ink-muted">Mode</span>
+                  <span className="font-semibold">Wallet M'Paye</span>
+                </div>
+              )}
+              {merchantQr.description && (
+                <div className="flex justify-between gap-3">
+                  <span className="text-ink-muted">Motif</span>
+                  <span className="font-semibold text-right">
+                    {merchantQr.description}
+                  </span>
+                </div>
+              )}
+              <div className="flex justify-between gap-3 pt-2 border-t border-bg-border">
+                <span className="text-ink-muted">Votre solde</span>
+                <span
+                  className={`font-semibold ${
+                    Number(merchantQr.montant) > balance
+                      ? 'text-danger-400'
+                      : 'text-success-400'
+                  }`}
+                >
+                  {formatCurrency(balance)}
+                </span>
+              </div>
+            </div>
+
+            <div className="flex gap-2 mt-5">
+              <Button
+                variant="secondary"
+                size="lg"
+                fullWidth
+                onClick={cancelMerchantQr}
+                disabled={merchantQrLoading}
+              >
+                Annuler
+              </Button>
+              <Button
+                variant="primary"
+                size="lg"
+                fullWidth
+                loading={merchantQrLoading}
+                disabled={Number(merchantQr.montant) > balance}
+                icon={Send}
+                onClick={confirmMerchantQrPayment}
+              >
+                Payer
+              </Button>
+            </div>
+          </Card>
+        </div>
+      )}
 
       {/* Success modal */}
       {success && (

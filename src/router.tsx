@@ -15,7 +15,27 @@ import Bills from './pages/app/Bills';
 import Cards from './pages/app/Cards';
 import Chat from './pages/app/Chat';
 import CompleteProfile from './pages/app/CompleteProfile';
+import FaceLiveness from './pages/app/FaceLiveness';
 import Dashboard from './pages/app/Dashboard';
+import MerchantDashboard from './pages/app/merchant/Dashboard';
+import MerchantTransactions from './pages/app/merchant/Transactions';
+import MerchantProducts from './pages/app/merchant/Products';
+import MerchantStores from './pages/app/merchant/Stores';
+import MerchantBalance from './pages/app/merchant/Balance';
+import MerchantCoupons from './pages/app/merchant/Coupons';
+import MerchantPaymentLinks from './pages/app/merchant/PaymentLinks';
+import MerchantLoyalty from './pages/app/merchant/Loyalty';
+import MerchantQrCode from './pages/app/merchant/QrCode';
+import MerchantWithdraw from './pages/app/merchant/Withdraw';
+import MerchantRefunds from './pages/app/merchant/Refunds';
+import MerchantScanner from './pages/app/merchant/Scanner';
+import MerchantAnalytics from './pages/app/merchant/Analytics';
+import MerchantReports from './pages/app/merchant/Reports';
+import MerchantEmployees from './pages/app/merchant/Employees';
+import MerchantNotifications from './pages/app/merchant/Notifications';
+import MerchantHelp from './pages/app/merchant/Help';
+import Loyalty from './pages/app/Loyalty';
+import PayLink from './pages/app/PayLink';
 import FlightBooking from './pages/app/FlightBooking';
 import History from './pages/app/History';
 import Hotels from './pages/app/Hotels';
@@ -51,6 +71,16 @@ export const router = createBrowserRouter([
   { path: '/auth/register', element: guest(<Register />) },
   { path: '/auth/forgot-password', element: guest(<ForgotPassword />) },
 
+  // Page de paiement (lien partagé) — protégée mais sans shell
+  {
+    path: '/pay/:reference',
+    element: (
+      <ProtectedRoute>
+        <PayLink />
+      </ProtectedRoute>
+    ),
+  },
+
   // App shell — toutes les pages protégées sont enfants de AppLayout
   {
     element: (
@@ -66,9 +96,27 @@ export const router = createBrowserRouter([
       { path: '/qr-payment', element: <QrPayment /> },
       { path: '/cards', element: <Cards /> },
       { path: '/beneficiaries', element: <Beneficiaries /> },
+      { path: '/loyalty', element: <Loyalty /> },
       { path: '/bills', element: <Bills /> },
       { path: '/seller-mode', element: <SellerMode /> },
       { path: '/merchant-signup', element: <MerchantSignup /> },
+      { path: '/merchant', element: <MerchantDashboard /> },
+      { path: '/merchant/payment-links', element: <MerchantPaymentLinks /> },
+      { path: '/merchant/qrcode', element: <MerchantQrCode /> },
+      { path: '/merchant/scanner', element: <MerchantScanner /> },
+      { path: '/merchant/analytics', element: <MerchantAnalytics /> },
+      { path: '/merchant/withdraw', element: <MerchantWithdraw /> },
+      { path: '/merchant/refunds', element: <MerchantRefunds /> },
+      { path: '/merchant/reports', element: <MerchantReports /> },
+      { path: '/merchant/employees', element: <MerchantEmployees /> },
+      { path: '/merchant/notifications', element: <MerchantNotifications /> },
+      { path: '/merchant/help', element: <MerchantHelp /> },
+      { path: '/merchant/loyalty', element: <MerchantLoyalty /> },
+      { path: '/merchant/transactions', element: <MerchantTransactions /> },
+      { path: '/merchant/products', element: <MerchantProducts /> },
+      { path: '/merchant/stores', element: <MerchantStores /> },
+      { path: '/merchant/balance', element: <MerchantBalance /> },
+      { path: '/merchant/coupons', element: <MerchantCoupons /> },
       { path: '/premium', element: <Premium /> },
       { path: '/messages', element: <Messages /> },
       { path: '/messages/:id', element: <Chat /> },
@@ -86,6 +134,7 @@ export const router = createBrowserRouter([
       { path: '/settings', element: <Settings /> },
       { path: '/security', element: <Security /> },
       { path: '/complete-profile', element: <CompleteProfile /> },
+      { path: '/kyc-liveness', element: <FaceLiveness /> },
       { path: '/admin-payments', element: <AdminPayments /> },
       { path: '/admin-revenue', element: <AdminRevenue /> },
     ],

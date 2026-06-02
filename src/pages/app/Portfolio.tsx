@@ -13,14 +13,23 @@ import {
   Info,
   Lock,
   Phone,
+  Plus,
   RefreshCcw,
   TrendingUp,
   Wallet,
+  X,
   XCircle,
   type LucideIcon,
 } from 'lucide-react';
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
+import { loadStripe, type Stripe } from '@stripe/stripe-js';
+import {
+  Elements,
+  CardElement,
+  useStripe,
+  useElements,
+} from '@stripe/react-stripe-js';
 import { useLocale } from '../../contexts/LocaleContext';
 import { useWallet } from '../../contexts/WalletContext';
 import {
@@ -28,6 +37,8 @@ import {
   type PaymentRequest,
   type PaymentRequestMethod,
 } from '../../services/paymentApi';
+import { cardsApi, type SavedCard } from '../../services/cardsApi';
+import { providersApi } from '../../services/providersApi';
 import { Badge, Button, Card, Empty, Input, PageHeader, Skeleton } from '../../ui';
 
 type Tab = 'deposit' | 'withdraw';
@@ -86,6 +97,37 @@ export default function Portfolio() {
   const [requests, setRequests] = useState<PaymentRequest[]>([]);
   const [loadingReq, setLoadingReq] = useState(true);
 
+  // === Stripe carte (dépôt) ===
+  const [savedCards, setSavedCards] = useState<SavedCard[]>([]);
+  const [stripePromise, setStripePromise] = useState<Promise<Stripe | null> | null>(null);
+  const [cardModal, setCardModal] = useState(false);
+  const [stripeClientSecret, setStripeClientSecret] = useState<string | null>(null);
+  const [stripePaymentRequestId, setStripePaymentRequestId] = useState<string | null>(null);
+  const [useNewCard, setUseNewCard] = useState(false);
+  const [selectedCardId, setSelectedCardId] = useState<string | null>(null);
+  const [cardModalError, setCardModalError] = useState<string | null>(null);
+
+  // === Modal résultat (success/info/error) ===
+  const [resultModal, setResultModal] = useState<{
+    tone: 'success' | 'info' | 'danger';
+    title: string;
+    message: string;
+    reference?: string;
+  } | null>(null);
+
+  const loadSavedCards = useCallback(async () => {
+    try {
+      const r = await cardsApi.list();
+      setSavedCards(Array.isArray(r.data) ? r.data : []);
+    } catch {
+      setSavedCards([]);
+    }
+  }, []);
+
+  useEffect(() => {
+    void loadSavedCards();
+  }, [loadSavedCards]);
+
   const loadRequests = useCallback(async () => {
     try {
       const r = await paymentApi.listMine();
@@ -130,30 +172,160 @@ export default function Portfolio() {
       return;
     }
     const amt = parseFloat(amount);
-    setSubmitting(true);
-    try {
-      if (tab === 'deposit' && method === 'CARD') {
-        const r = await paymentApi.createStripeIntent(amt);
-        alert(`Stripe — demande créée (${r.data.reference}).\nclientSecret: ${r.data.clientSecret?.slice(0, 30)}...`);
+
+    // === Cas 1 : Dépôt carte → flow Stripe Elements (réel)
+    if (tab === 'deposit' && method === 'CARD') {
+      void openCardModal(amt);
+      return;
+    }
+
+    // === Cas 2 : Dépôt Mobile Money auto (MVola / Airtel) → providersApi
+    const autoOperators: Record<string, { code: string; label: string }> = {
+      mvola: { code: 'MVOLA', label: 'MVola' },
+      airtel: { code: 'AIRTEL_MONEY', label: 'Airtel Money' },
+    };
+    const auto =
+      tab === 'deposit' &&
+      method === 'MOBILE_MONEY' &&
+      details.operator &&
+      autoOperators[details.operator];
+    if (auto) {
+      setSubmitting(true);
+      try {
+        const res = await providersApi.mobileMoneyDeposit(
+          auto.code,
+          amt,
+          details.phoneNumber!.trim(),
+        );
+        const status = res.data.status;
+        if (status === 'SUCCESS') {
+          await fetchBalance();
+          setResultModal({
+            tone: 'success',
+            title: `Dépôt ${auto.label} réussi`,
+            message: `${amt.toLocaleString('fr-FR')} Ar crédités sur votre wallet.`,
+            reference: res.data.reference,
+          });
+        } else if (status === 'FAILED') {
+          setResultModal({
+            tone: 'danger',
+            title: `Dépôt ${auto.label} refusé`,
+            message: res.data.message ?? `${auto.label} a refusé la transaction.`,
+            reference: res.data.reference,
+          });
+        } else {
+          setResultModal({
+            tone: 'info',
+            title: `En attente ${auto.label}`,
+            message:
+              res.data.message ??
+              `${auto.label} met du temps à confirmer. Rafraîchissez dans quelques minutes pour voir le statut final.`,
+            reference: res.data.reference,
+          });
+        }
         reset();
         await loadRequests();
-        return;
+      } catch (e: any) {
+        setResultModal({
+          tone: 'danger',
+          title: `Erreur ${auto.label}`,
+          message:
+            e?.response?.data?.message ||
+            e?.message ||
+            `Échec dépôt ${auto.label}`,
+        });
+      } finally {
+        setSubmitting(false);
       }
+      return;
+    }
+
+    // === Cas 3 : Autre (Bank, Cash, MOBILE_MONEY non-auto, ou retrait) → PaymentRequest
+    setSubmitting(true);
+    try {
       const r = await paymentApi.create({
         type: tab === 'deposit' ? 'DEPOSIT' : 'WITHDRAWAL',
         method: method!,
         amount: amt,
         details: Object.keys(details).length ? details : undefined,
       });
-      alert(`Demande créée ✅\nRéf : ${r.data.reference}\n\n${getInstructions(method!, tab, r.data.reference)}`);
+      setResultModal({
+        tone: 'info',
+        title: 'Demande créée',
+        message: getInstructions(method!, tab, r.data.reference),
+        reference: r.data.reference,
+      });
       reset();
       await loadRequests();
       await fetchBalance();
     } catch (e: any) {
-      alert(e?.response?.data?.message || 'Échec de la demande');
+      setResultModal({
+        tone: 'danger',
+        title: 'Erreur',
+        message: e?.response?.data?.message || 'Échec de la demande',
+      });
     } finally {
       setSubmitting(false);
     }
+  };
+
+  /**
+   * Prépare l'intent Stripe + initialise Stripe.js et ouvre la modale carte.
+   * Le flow exact dans la modale :
+   *  1. Si carte sauvegardée sélectionnée → confirmCardPayment direct
+   *  2. Si nouvelle carte → SetupIntent + save → puis PaymentIntent + confirm
+   *  3. Backend confirme côté serveur → crédit du wallet
+   */
+  const openCardModal = async (amt: number) => {
+    setSubmitting(true);
+    setCardModalError(null);
+    try {
+      const intent = await paymentApi.createStripeIntent(amt);
+      if (!intent.data.clientSecret) {
+        throw new Error('Stripe non configuré (clientSecret manquant)');
+      }
+      if (!intent.data.publishableKey) {
+        throw new Error('Stripe non configuré (publishableKey manquant)');
+      }
+      setStripePromise(loadStripe(intent.data.publishableKey));
+      setStripeClientSecret(intent.data.clientSecret);
+      setStripePaymentRequestId(intent.data.paymentRequestId);
+      setSelectedCardId(savedCards.find((c) => c.isDefault)?.id ?? null);
+      setUseNewCard(savedCards.length === 0);
+      setCardModal(true);
+    } catch (e: any) {
+      setResultModal({
+        tone: 'danger',
+        title: 'Stripe indisponible',
+        message:
+          e?.response?.data?.message ||
+          e?.message ||
+          'Impossible de préparer le paiement par carte',
+      });
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
+  const closeCardModal = () => {
+    setCardModal(false);
+    setStripeClientSecret(null);
+    setStripePaymentRequestId(null);
+    setUseNewCard(false);
+    setSelectedCardId(null);
+    setCardModalError(null);
+  };
+
+  const onCardDepositSuccess = async (amt: number, reference: string) => {
+    closeCardModal();
+    await Promise.all([fetchBalance(), loadRequests(), loadSavedCards()]);
+    setResultModal({
+      tone: 'success',
+      title: 'Dépôt réussi',
+      message: `${amt.toLocaleString('fr-FR')} Ar crédités sur votre wallet.`,
+      reference,
+    });
+    reset();
   };
 
   const handleCancel = async (id: string) => {
@@ -507,6 +679,285 @@ export default function Portfolio() {
           </Card>
         </div>
       </div>
+
+      {/* ============================================================== */}
+      {/* Modal Stripe carte (dépôt CARD) — flow réel @stripe/react-stripe-js */}
+      {/* ============================================================== */}
+      {cardModal && stripeClientSecret && stripePromise && (
+        <div className="fixed inset-0 z-50 bg-black/70 backdrop-blur-sm flex items-center justify-center p-4 animate-fade-in">
+          <Card padding="lg" className="max-w-md w-full animate-slide-in">
+            <div className="flex items-center justify-between mb-4">
+              <div className="flex items-center gap-2">
+                <Lock size={18} className="text-brand-300" />
+                <div className="text-base font-bold">Paiement par carte</div>
+              </div>
+              <button
+                onClick={closeCardModal}
+                className="p-1.5 rounded-lg hover:bg-bg-elevated"
+              >
+                <X size={16} />
+              </button>
+            </div>
+
+            <div className="text-3xl font-extrabold text-center my-3">
+              {parseFloat(amount).toLocaleString('fr-FR')} Ar
+            </div>
+
+            {/* Carte sauvegardée vs nouvelle carte */}
+            {savedCards.length > 0 && (
+              <div className="space-y-2 mb-4">
+                {savedCards.map((c) => {
+                  const selected = !useNewCard && selectedCardId === c.id;
+                  return (
+                    <button
+                      key={c.id}
+                      onClick={() => {
+                        setUseNewCard(false);
+                        setSelectedCardId(c.id);
+                      }}
+                      className={`w-full flex items-center gap-3 p-3 rounded-xl border transition text-left ${
+                        selected
+                          ? 'border-brand-500 bg-brand-500/10'
+                          : 'border-bg-border bg-bg-elevated hover:border-brand-500/40'
+                      }`}
+                    >
+                      <CreditCard
+                        size={20}
+                        className={selected ? 'text-brand-300' : 'text-ink-muted'}
+                      />
+                      <div className="flex-1">
+                        <div className="text-sm font-semibold uppercase">
+                          {c.brand} •••• {c.last4}
+                        </div>
+                        <div className="text-[11px] text-ink-muted">
+                          Exp. {c.expiration}
+                          {c.isDefault ? ' · Par défaut' : ''}
+                        </div>
+                      </div>
+                      {selected && (
+                        <CheckCircle2 size={18} className="text-brand-300" />
+                      )}
+                    </button>
+                  );
+                })}
+                <button
+                  onClick={() => {
+                    setUseNewCard(true);
+                    setSelectedCardId(null);
+                  }}
+                  className={`w-full flex items-center gap-3 p-3 rounded-xl border transition text-left ${
+                    useNewCard
+                      ? 'border-brand-500 bg-brand-500/10'
+                      : 'border-bg-border bg-bg-elevated hover:border-brand-500/40'
+                  }`}
+                >
+                  <Plus
+                    size={20}
+                    className={useNewCard ? 'text-brand-300' : 'text-ink-muted'}
+                  />
+                  <div className="text-sm font-semibold">Utiliser une autre carte</div>
+                </button>
+              </div>
+            )}
+
+            <Elements stripe={stripePromise} options={{ clientSecret: stripeClientSecret }}>
+              <StripeDepositForm
+                amount={parseFloat(amount)}
+                paymentRequestId={stripePaymentRequestId!}
+                useNewCard={useNewCard || savedCards.length === 0}
+                onError={(msg) => setCardModalError(msg)}
+                onSuccess={onCardDepositSuccess}
+              />
+            </Elements>
+
+            {cardModalError && (
+              <div className="flex items-start gap-2 mt-3 p-3 rounded-lg bg-danger-bg text-danger-400 text-xs">
+                <XCircle size={14} className="shrink-0 mt-0.5" />
+                <span>{cardModalError}</span>
+              </div>
+            )}
+
+            <div className="flex items-center justify-center gap-1.5 mt-4 text-[11px] text-ink-muted">
+              <Lock size={11} />
+              Paiement sécurisé via Stripe
+            </div>
+          </Card>
+        </div>
+      )}
+
+      {/* ============================================================== */}
+      {/* Modal résultat (success / info / danger) */}
+      {/* ============================================================== */}
+      {resultModal && (
+        <div className="fixed inset-0 z-50 bg-black/70 backdrop-blur-sm flex items-center justify-center p-4 animate-fade-in">
+          <Card padding="lg" className="max-w-md w-full text-center animate-slide-in">
+            <div
+              className={`w-16 h-16 mx-auto rounded-full flex items-center justify-center mb-3 ${
+                resultModal.tone === 'success'
+                  ? 'bg-success-bg text-success-400'
+                  : resultModal.tone === 'danger'
+                    ? 'bg-danger-bg text-danger-400'
+                    : 'bg-warning-bg text-warning-400'
+              }`}
+            >
+              {resultModal.tone === 'success' ? (
+                <CheckCircle2 size={42} />
+              ) : resultModal.tone === 'danger' ? (
+                <XCircle size={42} />
+              ) : (
+                <Info size={42} />
+              )}
+            </div>
+            <div className="text-lg font-bold mb-1">{resultModal.title}</div>
+            <div className="text-sm text-ink-muted whitespace-pre-line">
+              {resultModal.message}
+            </div>
+            {resultModal.reference && (
+              <div className="text-[11px] text-ink-dim mt-3 font-mono">
+                Réf : {resultModal.reference}
+              </div>
+            )}
+            <Button
+              variant="primary"
+              size="md"
+              fullWidth
+              className="mt-5"
+              onClick={() => setResultModal(null)}
+            >
+              OK
+            </Button>
+          </Card>
+        </div>
+      )}
+    </div>
+  );
+}
+
+/**
+ * Formulaire Stripe Elements dans le modal de dépôt carte.
+ * Branche A : carte sauvegardée → confirmCardPayment direct avec payment_method id
+ * Branche B : nouvelle carte → confirmCardSetup (token) + saveCard + confirmCardPayment
+ *
+ * Le backend confirme la transaction côté serveur après succès Stripe pour créditer
+ * le wallet (cf. paymentApi.confirmStripeDeposit).
+ */
+function StripeDepositForm({
+  amount,
+  paymentRequestId,
+  useNewCard,
+  onError,
+  onSuccess,
+}: {
+  amount: number;
+  paymentRequestId: string;
+  useNewCard: boolean;
+  onError: (msg: string) => void;
+  onSuccess: (amount: number, reference: string) => void | Promise<void>;
+}) {
+  const stripe = useStripe();
+  const elements = useElements();
+  const [busy, setBusy] = useState(false);
+
+  const cardStyle = useMemo(
+    () => ({
+      style: {
+        base: {
+          color: '#e5e7eb',
+          fontSize: '16px',
+          '::placeholder': { color: '#6b7280' },
+        },
+        invalid: { color: '#f87171' },
+      },
+    }),
+    [],
+  );
+
+  async function submit() {
+    if (!stripe || !elements) {
+      onError('Stripe pas prêt');
+      return;
+    }
+    setBusy(true);
+    onError('');
+    try {
+      let paymentMethodId: string | null = null;
+
+      if (useNewCard) {
+        // 1. Tokeniser la carte via SetupIntent (réutilisable pour les prochains dépôts)
+        const setup = await cardsApi.createSetupIntent();
+        const cardEl = elements.getElement(CardElement);
+        if (!cardEl) throw new Error('Champ carte introuvable');
+        const { setupIntent, error: setupErr } = await stripe.confirmCardSetup(
+          setup.data.clientSecret,
+          { payment_method: { card: cardEl } },
+        );
+        if (setupErr) {
+          throw new Error(setupErr.message || 'Échec enregistrement carte');
+        }
+        const pmId = setupIntent?.payment_method;
+        if (!pmId || typeof pmId !== 'string') {
+          throw new Error('Carte non tokenisée');
+        }
+        paymentMethodId = pmId;
+        // On enregistre côté backend (non bloquant)
+        try {
+          await cardsApi.saveCard(pmId);
+        } catch {
+          /* */
+        }
+      }
+
+      // 2. Confirme le PaymentIntent (initié dans openCardModal)
+      //    Si paymentMethodId non null (nouvelle carte), on l'utilise ;
+      //    sinon Stripe utilise la carte attachée au customer (saved card par défaut).
+      const intent = await paymentApi.createStripeIntent(amount);
+      const clientSecret = intent.data.clientSecret;
+      if (!clientSecret) throw new Error('clientSecret manquant');
+
+      const confirmRes = await stripe.confirmCardPayment(clientSecret, {
+        payment_method: paymentMethodId
+          ? paymentMethodId
+          : { card: elements.getElement(CardElement)! },
+      });
+      if (confirmRes.error) {
+        throw new Error(confirmRes.error.message || 'Paiement refusé');
+      }
+      if (confirmRes.paymentIntent?.status !== 'succeeded') {
+        throw new Error(
+          `Statut Stripe : ${confirmRes.paymentIntent?.status ?? 'inconnu'}`,
+        );
+      }
+
+      // 3. Confirme côté backend (crédit wallet)
+      const confirmed = await paymentApi.confirmStripeDeposit(
+        intent.data.paymentRequestId || paymentRequestId,
+      );
+      await onSuccess(amount, confirmed.data.reference);
+    } catch (e: any) {
+      onError(e?.response?.data?.message || e?.message || 'Erreur paiement');
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <div className="space-y-3">
+      {useNewCard && (
+        <div className="bg-bg-elevated border border-bg-border rounded-xl px-3 py-3">
+          <CardElement options={cardStyle} />
+        </div>
+      )}
+      <Button
+        variant="primary"
+        size="lg"
+        fullWidth
+        loading={busy}
+        disabled={!stripe || !elements}
+        icon={Lock}
+        onClick={submit}
+      >
+        Payer {amount.toLocaleString('fr-FR')} Ar
+      </Button>
     </div>
   );
 }

@@ -72,6 +72,9 @@ export const authService = {
   logout: (refreshToken: string) =>
     api.post('/auth/logout', { refreshToken }).then((r) => r.data),
   logoutAll: () => api.post('/auth/logout-all').then((r) => r.data),
+  getSessions: () => api.get('/auth/sessions').then((r) => r.data),
+  revokeDevice: (deviceId: string) =>
+    api.post('/auth/sessions/revoke', { deviceId }).then((r) => r.data),
   getCurrentUser: () => api.get('/auth/me').then((r) => r.data),
   changePassword: (data: any) =>
     api.post('/auth/change-password', data).then((r) => r.data),
@@ -87,6 +90,15 @@ export const authService = {
     api.post('/auth/register/verify', data).then((r) => r.data),
 };
 
+export const kycService = {
+  status: () => api.get('/kyc/status').then((r) => r.data),
+  submitLiveness: (payload: {
+    level?: string;
+    sequence: string[];
+    frames: { direction: string; image: string }[];
+  }) => api.post('/kyc/liveness', payload).then((r) => r.data),
+};
+
 export const userPreferencesService = {
   get: () => api.get('/user/preferences').then((r) => r.data),
   update: (data: any) => api.patch('/user/preferences', data).then((r) => r.data),
@@ -96,8 +108,8 @@ export const accountService = {
   getBalance: () => api.get('/wallet/balance').then((r) => r.data),
   getHistory: (params?: any) =>
     api.get('/wallet/history', { params }).then((r) => r.data),
-  deposit: (data: any) => api.post('/wallet/deposit', data).then((r) => r.data),
-  withdraw: (data: any) => api.post('/wallet/withdraw', data).then((r) => r.data),
+  // Dépôts via Stripe (paymentApi) ou validation admin (payment-requests).
+  // Retraits via payment-requests. Les anciens /wallet/{deposit,withdraw} ont été retirés.
   getProfile: () => api.get('/user/profile').then((r) => r.data),
   updateProfile: (data: any) =>
     api.patch('/user/profile', data).then((r) => r.data),
@@ -135,6 +147,55 @@ export const beneficiaryService = {
   toggleFavorite: (id: string) =>
     api.patch(`/beneficiaries/${id}/favorite`).then((r) => r.data),
   remove: (id: string) => api.delete(`/beneficiaries/${id}`).then((r) => r.data),
+};
+
+/**
+ * QR de paiement marchand (Mode A : payout direct mobile / Mode B : crédit wallet).
+ *  - POST  /qr/generate         (marchand auth)
+ *  - GET   /qr/info/:reference  (public, preview)
+ *  - POST  /qr/pay/:reference   (payeur auth + idempotency-key)
+ */
+export interface QrInfo {
+  reference: string;
+  montant: number;
+  devise: string;
+  description: string | null;
+  statut: 'PENDING' | 'PAID' | 'EXPIRED' | 'CANCELLED' | 'PROCESSING' | 'FAILED';
+  mode: 'DIRECT_MOBILE' | 'WALLET';
+  payoutOperator: 'MVOLA' | 'AIRTEL_MONEY' | 'ORANGE_MONEY' | null;
+  payoutOperatorLabel: string | null;
+  payoutPhoneMasked: string | null;
+  merchant: { id: string; nom: string; logoUrl: string | null };
+  expiration: string;
+  paidAt: string | null;
+}
+
+export interface QrGenerateResult {
+  reference: string;
+  montant: number;
+  devise: string;
+  description: string | null;
+  mode: 'DIRECT_MOBILE' | 'WALLET';
+  payoutOperator: string | null;
+  expiration: string;
+}
+
+export const qrService = {
+  generate: (data: {
+    montant: number;
+    description?: string;
+    payoutPhone?: string;
+  }) => api.post<QrGenerateResult>('/qr/generate', data).then((r) => r.data),
+
+  info: (reference: string) =>
+    api.get<QrInfo>(`/qr/info/${reference}`).then((r) => r.data),
+
+  pay: (reference: string, idempotencyKey?: string) =>
+    api
+      .post(`/qr/pay/${reference}`, null, {
+        headers: idempotencyKey ? { 'Idempotency-Key': idempotencyKey } : {},
+      })
+      .then((r) => r.data),
 };
 
 export default api;

@@ -22,6 +22,8 @@ import {
   type SeatMap,
   type VoyageSearchResult,
 } from '../../services/taxiBrousseApi';
+import SeatPlanView from '../../components/SeatPlanView';
+import RouteMap from '../../components/RouteMap';
 import {
   Badge,
   Button,
@@ -41,10 +43,19 @@ export default function TaxiBrousseVoyage() {
   const [voyage, setVoyage] = useState<VoyageSearchResult | null>(null);
   const [seatMap, setSeatMap] = useState<SeatMap | null>(null);
   const [loading, setLoading] = useState(true);
-  const [selectedSeat, setSelectedSeat] = useState<number | null>(null);
+  const [selectedSeats, setSelectedSeats] = useState<number[]>([]);
   const [payMethod, setPayMethod] = useState<PayMethod>('wallet');
   const [submitting, setSubmitting] = useState(false);
-  const [success, setSuccess] = useState<{ code: string } | null>(null);
+  const [success, setSuccess] = useState<{ seats: number[]; count: number } | null>(
+    null,
+  );
+
+  const toggleSeat = (n: number) =>
+    setSelectedSeats((prev) =>
+      prev.includes(n) ? prev.filter((s) => s !== n) : [...prev, n],
+    );
+
+  const totalPrice = voyage ? Number(voyage.prix) * selectedSeats.length : 0;
 
   const load = useCallback(async () => {
     if (!id) return;
@@ -69,16 +80,21 @@ export default function TaxiBrousseVoyage() {
   }, [load]);
 
   const book = async () => {
-    if (!voyage || !selectedSeat) return;
-    if (payMethod === 'wallet' && balance < voyage.prix) {
+    if (!voyage || selectedSeats.length === 0) return;
+    if (payMethod === 'wallet' && balance < totalPrice) {
       return alert(`Solde insuffisant — ${formatCurrency(balance)} disponible`);
     }
     setSubmitting(true);
     try {
-      const r = await taxiBrousseApi.createReservation(voyage.id, selectedSeat, voyage.prix);
-      await taxiBrousseApi.payReservation(r.data.id, payMethod);
+      const r = await taxiBrousseApi.createReservationBatch(
+        voyage.id,
+        selectedSeats,
+        voyage.prix,
+      );
+      const ids = r.data.map((res) => res.id);
+      await taxiBrousseApi.payReservationBatch(ids, payMethod);
       if (payMethod === 'wallet') await fetchBalance();
-      setSuccess({ code: r.data.codeConfirmation });
+      setSuccess({ seats: [...selectedSeats], count: selectedSeats.length });
     } catch (e: any) {
       alert(e?.response?.data?.message || 'Réservation échouée');
     } finally {
@@ -107,17 +123,22 @@ export default function TaxiBrousseVoyage() {
           </div>
           <h2 className="text-2xl font-bold mb-2">Réservation confirmée !</h2>
           <p className="text-sm text-ink-muted mb-5">
-            Place <span className="text-brand-300 font-bold">n°{selectedSeat}</span> sur le
-            voyage {voyage?.villeDepart} → {voyage?.villeArrivee}
+            {success.count} place(s){' '}
+            <span className="text-brand-300 font-bold">
+              n°{success.seats.join(', ')}
+            </span>{' '}
+            sur le voyage {voyage?.villeDepart} → {voyage?.villeArrivee}
           </p>
 
           <div className="rounded-2xl bg-gradient-brand-soft border border-brand-500/30 p-5 mb-6">
-            <div className="text-xs text-ink-muted">Code de confirmation</div>
+            <div className="text-xs text-ink-muted">
+              {success.count} place(s) réservée(s) et payée(s)
+            </div>
             <div className="text-3xl font-mono font-bold tracking-widest text-brand-300 mt-2">
-              {success.code}
+              {success.seats.map((s) => `n°${s}`).join(' · ')}
             </div>
             <div className="text-[11px] text-ink-dim mt-2">
-              Présentez ce code au chauffeur le jour du départ
+              Retrouvez vos codes de confirmation dans « Mes réservations »
             </div>
           </div>
 
@@ -238,6 +259,24 @@ export default function TaxiBrousseVoyage() {
             </div>
           </Card>
 
+          {/* Carte itinéraire */}
+          <Card padding="md">
+            <h3 className="text-base font-bold mb-3">Itinéraire sur la carte</h3>
+            <RouteMap
+              height={360}
+              departure={{
+                lat: voyage.latitudeDepart,
+                lng: voyage.longitudeDepart,
+                label: voyage.localisationDepart,
+              }}
+              arrival={{
+                lat: voyage.latitudeArrivee,
+                lng: voyage.longitudeArrivee,
+                label: voyage.localisationArrivee,
+              }}
+            />
+          </Card>
+
           {/* Vehicle info */}
           <Card padding="md">
             <h3 className="text-base font-bold mb-4">Véhicule & équipage</h3>
@@ -279,54 +318,28 @@ export default function TaxiBrousseVoyage() {
           {seatMap && (
             <Card padding="md">
               <div className="flex items-center justify-between mb-4">
-                <h3 className="text-base font-bold">Choisissez votre place</h3>
+                <h3 className="text-base font-bold">
+                  Choisissez vos places
+                  {selectedSeats.length > 0 && (
+                    <span className="text-brand-300">
+                      {' '}
+                      ({selectedSeats.length})
+                    </span>
+                  )}
+                </h3>
                 <span className="text-xs text-ink-muted">
                   {seatMap.availableCount}/{seatMap.capacity} libres
                 </span>
               </div>
 
-              {/* Legend */}
-              <div className="flex items-center justify-center gap-4 mb-5 text-[11px]">
-                <Legend label="Sélectionnée" colorClass="bg-brand-500" />
-                <Legend label="Libre" border />
-                <Legend label="Réservée" colorClass="bg-danger-500/30 border border-danger-500" />
-              </div>
-
-              {/* Bus body visualization */}
-              <div className="max-w-md mx-auto">
-                {/* Driver hint */}
-                <div className="flex justify-end mb-3">
-                  <div className="flex items-center gap-1.5 px-3 py-1 rounded-lg bg-bg-elevated text-ink-muted text-[10px] font-semibold">
-                    <UserIcon size={11} />
-                    Chauffeur
-                  </div>
-                </div>
-
-                {/* Seats grid */}
-                <div className="p-4 rounded-2xl border-2 border-bg-border bg-bg-elevated/30">
-                  <div className="grid grid-cols-4 gap-2">
-                    {seatMap.seats.map((seat) => {
-                      const isSelected = selectedSeat === seat.numPlace;
-                      const isReserved = seat.isReserved;
-                      return (
-                        <button
-                          key={seat.numPlace}
-                          disabled={isReserved}
-                          onClick={() => setSelectedSeat(seat.numPlace)}
-                          className={`aspect-square rounded-xl border-2 flex items-center justify-center text-sm font-bold transition-all ${
-                            isReserved
-                              ? 'bg-danger-500/20 border-danger-500/50 text-danger-400 opacity-60 cursor-not-allowed'
-                              : isSelected
-                                ? 'bg-gradient-brand border-brand-500 text-white shadow-glow-soft scale-105'
-                                : 'border-bg-border bg-bg-surface text-ink hover:border-brand-500 hover:scale-105'
-                          }`}
-                        >
-                          {seat.numPlace}
-                        </button>
-                      );
-                    })}
-                  </div>
-                </div>
+              <div className="p-4 rounded-2xl border-2 border-bg-border bg-bg-elevated/30 overflow-auto">
+                <SeatPlanView
+                  layout={seatMap.layout}
+                  seatPositions={seatMap.seatPositions}
+                  seats={seatMap.seats}
+                  selectedSeats={selectedSeats}
+                  onSelectSeat={toggleSeat}
+                />
               </div>
             </Card>
           )}
@@ -379,9 +392,17 @@ export default function TaxiBrousseVoyage() {
               <Row label="Classe">
                 <Badge tone="brand">{voyage.classe?.type || 'Standard'}</Badge>
               </Row>
-              <Row label="Place">
-                {selectedSeat ? (
-                  <Badge tone="success">n°{selectedSeat}</Badge>
+              <Row label="Places">
+                {selectedSeats.length > 0 ? (
+                  <div className="flex flex-wrap gap-1 justify-end">
+                    {[...selectedSeats]
+                      .sort((a, b) => a - b)
+                      .map((s) => (
+                        <Badge key={s} tone="success">
+                          n°{s}
+                        </Badge>
+                      ))}
+                  </div>
                 ) : (
                   <span className="text-xs text-ink-dim italic">À choisir</span>
                 )}
@@ -396,22 +417,28 @@ export default function TaxiBrousseVoyage() {
             <div className="flex items-baseline justify-between mb-1">
               <span className="text-xs text-ink-muted">Total à payer</span>
               <span className="text-3xl font-bold tracking-tight">
-                {Number(voyage.prix).toLocaleString('fr-FR')}{' '}
+                {totalPrice.toLocaleString('fr-FR')}{' '}
                 <span className="text-base font-semibold">Ar</span>
               </span>
             </div>
-            <div className="text-[10px] text-ink-dim mb-5">Sans frais additionnels</div>
+            <div className="text-[10px] text-ink-dim mb-5">
+              {selectedSeats.length > 1
+                ? `${Number(voyage.prix).toLocaleString('fr-FR')} Ar × ${selectedSeats.length} places`
+                : 'Sans frais additionnels'}
+            </div>
 
             <Button
               variant="primary"
               size="lg"
               fullWidth
               loading={submitting}
-              disabled={!selectedSeat}
+              disabled={selectedSeats.length === 0}
               icon={Star}
               onClick={book}
             >
-              {selectedSeat ? `Réserver place ${selectedSeat}` : 'Choisir une place'}
+              {selectedSeats.length > 0
+                ? `Réserver ${selectedSeats.length} place(s)`
+                : 'Choisir une place'}
             </Button>
 
             <div className="text-[10px] text-ink-dim text-center mt-3">

@@ -246,6 +246,14 @@ export default function Profile() {
                 >
                   Vérifier mon identité
                 </Button>
+                <Button
+                  variant="secondary"
+                  size="sm"
+                  className="mt-2 w-full"
+                  onClick={() => navigate('/kyc-liveness')}
+                >
+                  📷 Vérifier mon visage
+                </Button>
               </div>
             )}
           </Card>

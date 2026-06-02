@@ -29,6 +29,10 @@ export interface Conversation {
   type: 'PRIVATE' | 'SUPPORT' | 'GROUP';
   title?: string | null;
   lastMessageAt?: string | null;
+  status?: 'OPEN' | 'ASSIGNED' | 'CLOSED';
+  assignedAgentId?: string | null;
+  rating?: number | null;
+  ratingComment?: string | null;
   participants: ChatParticipant[];
   messages?: ChatMessage[];
   unreadCount?: number;
@@ -52,6 +56,15 @@ export const messagingApi = {
     api.post<ChatMessage>(`/messaging/conversations/${id}/messages`, { content }),
 
   markRead: (id: string) => api.patch(`/messaging/conversations/${id}/read`),
+
+  closeConversation: (id: string) =>
+    api.patch<Conversation>(`/messaging/conversations/${id}/close`),
+
+  rateConversation: (id: string, rating: number, comment?: string) =>
+    api.post<Conversation>(`/messaging/conversations/${id}/rate`, {
+      rating,
+      comment,
+    }),
 };
 
 export default messagingApi;

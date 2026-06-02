@@ -14,18 +14,26 @@ import {
   Smartphone,
   Trash2,
 } from 'lucide-react';
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { useAuth } from '../../contexts/AuthContext';
 import { authService } from '../../services/api';
 import { Badge, Button, Card, Input, PageHeader } from '../../ui';
 
 interface Session {
-  id: string;
+  deviceId: string;
   deviceName: string;
-  location: string;
-  ipAddress: string;
+  deviceType?: string;
+  location?: string | null;
+  ipAddress?: string | null;
+  latitude?: number | null;
+  longitude?: number | null;
+  locationSource?: string | null;
+  os?: string | null;
+  osVersion?: string | null;
+  browser?: string | null;
+  model?: string | null;
   current: boolean;
-  lastActivity: string;
+  lastActivityAt: string;
 }
 
 function timeAgo(iso: string): string {
@@ -50,16 +58,20 @@ export default function Security() {
   const [twoFactor, setTwoFactor] = useState(false);
   const [biometric, setBiometric] = useState(false);
 
-  const [sessions, setSessions] = useState<Session[]>([
-    {
-      id: 'current',
-      deviceName: 'Navigateur web (Chrome)',
-      location: 'Antananarivo, Madagascar',
-      ipAddress: '—',
-      current: true,
-      lastActivity: new Date().toISOString(),
-    },
-  ]);
+  const [sessions, setSessions] = useState<Session[]>([]);
+
+  const loadSessions = async () => {
+    try {
+      const data = await authService.getSessions();
+      setSessions(Array.isArray(data) ? data : []);
+    } catch {
+      // garde liste vide
+    }
+  };
+
+  useEffect(() => {
+    loadSessions();
+  }, []);
 
   // Security score: max 100
   const passwordStrength = newPwd.length === 0 ? 0 : Math.min(100, newPwd.length * 8);
@@ -102,8 +114,19 @@ export default function Security() {
     if (!confirm('Déconnecter tous les autres appareils ?')) return;
     try {
       await logoutAllDevices();
-      setSessions((prev) => prev.filter((s) => s.current));
+      await loadSessions();
       flash('success', 'Tous les autres appareils déconnectés');
+    } catch {
+      flash('error', 'Échec de la déconnexion');
+    }
+  };
+
+  const revokeOne = async (deviceId: string) => {
+    if (!confirm('Déconnecter cet appareil ?')) return;
+    try {
+      await authService.revokeDevice(deviceId);
+      setSessions((prev) => prev.filter((s) => s.deviceId !== deviceId));
+      flash('success', 'Appareil déconnecté');
     } catch {
       flash('error', 'Échec de la déconnexion');
     }
@@ -289,14 +312,25 @@ export default function Security() {
               )}
             </div>
             <div className="space-y-2">
+              {sessions.length === 0 && (
+                <div className="text-sm text-ink-dim text-center py-4">
+                  Aucune session active
+                </div>
+              )}
               {sessions.map((s) => {
                 const isMobile =
-                  s.deviceName.toLowerCase().includes('iphone') ||
-                  s.deviceName.toLowerCase().includes('android');
+                  s.deviceType === 'MOBILE' || s.deviceType === 'TABLET';
                 const DeviceIcon = isMobile ? Smartphone : Monitor;
+                const detail = [
+                  s.os && (s.osVersion ? `${s.os} ${s.osVersion}` : s.os),
+                  s.browser,
+                  s.model,
+                ]
+                  .filter(Boolean)
+                  .join(' · ');
                 return (
                   <div
-                    key={s.id}
+                    key={s.deviceId}
                     className="flex items-center gap-3 p-3.5 rounded-xl border border-bg-border bg-bg-elevated/40"
                   >
                     <div className="w-11 h-11 rounded-xl bg-bg-elevated text-brand-300 flex items-center justify-center shrink-0">
@@ -305,20 +339,23 @@ export default function Security() {
                     <div className="flex-1 min-w-0">
                       <div className="flex items-center gap-2">
                         <div className="text-sm font-bold truncate">{s.deviceName}</div>
-                        {s.current && (
-                          <Badge tone="success">Cet appareil</Badge>
-                        )}
+                        {s.current && <Badge tone="success">Cet appareil</Badge>}
                       </div>
-                      <div className="text-xs text-ink-muted truncate">{s.location}</div>
+                      {detail && (
+                        <div className="text-[11px] text-ink-dim truncate">{detail}</div>
+                      )}
+                      <div className="text-xs text-ink-muted truncate">
+                        📍 {s.location || 'Localisation inconnue'}
+                        {s.locationSource === 'gps' ? ' (GPS)' : ''}
+                      </div>
                       <div className="text-[11px] text-ink-dim mt-0.5">
-                        {timeAgo(s.lastActivity)} · {s.ipAddress}
+                        {timeAgo(s.lastActivityAt)}
+                        {s.ipAddress ? ` · ${s.ipAddress}` : ''}
                       </div>
                     </div>
                     {!s.current && (
                       <button
-                        onClick={() =>
-                          setSessions((prev) => prev.filter((x) => x.id !== s.id))
-                        }
+                        onClick={() => revokeOne(s.deviceId)}
                         className="p-2 rounded-lg hover:bg-danger-bg text-ink-muted hover:text-danger-400"
                         title="Déconnecter"
                       >

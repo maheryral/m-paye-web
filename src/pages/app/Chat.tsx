@@ -48,13 +48,16 @@ export default function Chat() {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
   const { user } = useAuth();
-  const { onMessage, connected } = useSocket();
+  const { onMessage, onSupportClosed, connected } = useSocket();
 
   const [conversation, setConversation] = useState<Conversation | null>(null);
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [loading, setLoading] = useState(true);
   const [sending, setSending] = useState(false);
   const [text, setText] = useState('');
+  const [ratingValue, setRatingValue] = useState(0);
+  const [ratingComment, setRatingComment] = useState('');
+  const [ratingSubmitting, setRatingSubmitting] = useState(false);
 
   const scrollRef = useRef<HTMLDivElement | null>(null);
   const inputRef = useRef<HTMLTextAreaElement | null>(null);
@@ -117,6 +120,30 @@ export default function Chat() {
       }
     });
   }, [id, onMessage, scrollToBottom]);
+
+  // Fermeture par l'agent → recharge la conversation (déclenche la notation)
+  useEffect(() => {
+    return onSupportClosed((e) => {
+      if (e.conversationId === id) void load();
+    });
+  }, [id, onSupportClosed, load]);
+
+  const submitRating = async () => {
+    if (!id || ratingValue < 1 || ratingSubmitting) return;
+    setRatingSubmitting(true);
+    try {
+      const r = await messagingApi.rateConversation(
+        id,
+        ratingValue,
+        ratingComment.trim() || undefined,
+      );
+      setConversation(r.data);
+    } catch (e: any) {
+      alert(e?.response?.data?.message || 'Échec de la note');
+    } finally {
+      setRatingSubmitting(false);
+    }
+  };
 
   // Auto-resize textarea
   useEffect(() => {
@@ -344,7 +371,64 @@ export default function Chat() {
           )}
         </div>
 
-        {/* Input */}
+        {/* Input ou notation si fermée */}
+        {conversation?.status === 'CLOSED' ? (
+          <div className="p-4 border-t border-bg-border shrink-0">
+            {conversation.rating != null ? (
+              <div className="text-center text-sm text-ink-muted">
+                Merci ! Vous avez noté{' '}
+                <span className="text-warning-400">
+                  {'★'.repeat(conversation.rating)}
+                  <span className="text-ink-dim">
+                    {'★'.repeat(5 - conversation.rating)}
+                  </span>
+                </span>
+              </div>
+            ) : (
+              <div className="max-w-md mx-auto text-center space-y-3">
+                <div className="text-sm font-bold">
+                  Conversation terminée — notez votre agent
+                </div>
+                <div className="flex items-center justify-center gap-1">
+                  {[1, 2, 3, 4, 5].map((n) => (
+                    <button
+                      key={n}
+                      type="button"
+                      onClick={() => setRatingValue(n)}
+                      className="text-3xl leading-none transition-transform hover:scale-110"
+                    >
+                      <span
+                        className={
+                          n <= ratingValue ? 'text-warning-400' : 'text-ink-dim'
+                        }
+                      >
+                        ★
+                      </span>
+                    </button>
+                  ))}
+                </div>
+                <textarea
+                  rows={2}
+                  placeholder="Commentaire (optionnel)"
+                  value={ratingComment}
+                  onChange={(e) => setRatingComment(e.target.value)}
+                  className="w-full bg-bg-elevated border border-bg-border rounded-xl px-3 py-2 text-sm resize-none outline-none focus:border-brand-500"
+                  maxLength={300}
+                />
+                <Button
+                  variant="primary"
+                  size="md"
+                  fullWidth
+                  disabled={ratingValue < 1 || ratingSubmitting}
+                  loading={ratingSubmitting}
+                  onClick={submitRating}
+                >
+                  Envoyer ma note
+                </Button>
+              </div>
+            )}
+          </div>
+        ) : (
         <div className="p-3 border-t border-bg-border shrink-0">
           <div className="flex items-end gap-2">
             <button
@@ -396,6 +480,7 @@ export default function Chat() {
             pour nouvelle ligne
           </div>
         </div>
+        )}
       </Card>
 
       {/* ===== Side rail (1/4) — hidden on mobile ===== */}

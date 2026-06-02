@@ -40,6 +40,7 @@ interface SocketContextType {
   lastNotification: RealtimeNotification | null;
   onNotification: (cb: NotifListener) => () => void;
   onMessage: (cb: MsgListener) => () => void;
+  onSupportClosed: (cb: (e: { conversationId: string }) => void) => () => void;
   refreshUnreadCount: () => Promise<void>;
 }
 
@@ -50,6 +51,9 @@ export const SocketProvider: React.FC<{ children: React.ReactNode }> = ({ childr
   const socketRef = useRef<Socket | null>(null);
   const notifListeners = useRef<Set<NotifListener>>(new Set());
   const msgListeners = useRef<Set<MsgListener>>(new Set());
+  const closedListeners = useRef<
+    Set<(e: { conversationId: string }) => void>
+  >(new Set());
   const [connected, setConnected] = useState(false);
   const [unreadCount, setUnreadCount] = useState(0);
   const [lastNotification, setLastNotification] = useState<RealtimeNotification | null>(null);
@@ -102,6 +106,10 @@ export const SocketProvider: React.FC<{ children: React.ReactNode }> = ({ childr
         msgListeners.current.forEach((cb) => cb(e));
       });
 
+      socket.on('support:closed', (e: { conversationId: string }) => {
+        closedListeners.current.forEach((cb) => cb(e));
+      });
+
       socketRef.current = socket;
     };
 
@@ -131,6 +139,16 @@ export const SocketProvider: React.FC<{ children: React.ReactNode }> = ({ childr
     };
   }, []);
 
+  const onSupportClosed = useCallback(
+    (cb: (e: { conversationId: string }) => void) => {
+      closedListeners.current.add(cb);
+      return () => {
+        closedListeners.current.delete(cb);
+      };
+    },
+    [],
+  );
+
   return (
     <Ctx.Provider
       value={{
@@ -139,6 +157,7 @@ export const SocketProvider: React.FC<{ children: React.ReactNode }> = ({ childr
         lastNotification,
         onNotification,
         onMessage,
+        onSupportClosed,
         refreshUnreadCount,
       }}
     >

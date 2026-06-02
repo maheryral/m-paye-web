@@ -5,15 +5,23 @@ import {
   Cable,
   CreditCard,
   FileText,
+  Gift,
   Headset,
   History as HistoryIcon,
   LayoutDashboard,
+  Link2,
   LogOut,
   type LucideIcon,
   Menu,
   MessageSquare,
+  BarChart3,
+  HelpCircle,
+  Package,
   Plane,
+  QrCode,
+  Receipt,
   ScanLine,
+  Undo2,
   Search,
   Send,
   Settings,
@@ -21,12 +29,14 @@ import {
   ShieldCheck,
   Sparkles,
   Store,
+  Ticket,
   TrendingUp,
   Users,
   Wallet,
   X,
 } from 'lucide-react';
 import { useEffect, useState } from 'react';
+import { merchantApi } from '../services/merchantApi';
 import { Link, NavLink, Outlet, useLocation, useNavigate } from 'react-router-dom';
 import { Avatar, Button } from '../ui';
 import { useAuth } from '../contexts/AuthContext';
@@ -36,6 +46,7 @@ interface NavGroup {
   label: string;
   items: NavItem[];
   adminOnly?: boolean;
+  merchantOnly?: boolean;
 }
 
 interface NavItem {
@@ -43,7 +54,16 @@ interface NavItem {
   label: string;
   icon: LucideIcon;
   badge?: 'unread' | number;
+  cap?: string; // capacité marchand requise (filtrage par rôle)
 }
+
+// Matrice client (miroir du backend) : rôle → capacités visibles
+const ROLE_CAPS: Record<string, string[]> = {
+  OWNER: ['dashboard', 'transactions', 'collect', 'products', 'stores', 'withdrawals', 'coupons'],
+  MANAGER: ['dashboard', 'transactions', 'collect', 'products', 'stores', 'withdrawals', 'coupons'],
+  ACCOUNTANT: ['dashboard', 'transactions'],
+  CASHIER: ['transactions', 'collect'],
+};
 
 const GROUPS: NavGroup[] = [
   {
@@ -61,6 +81,7 @@ const GROUPS: NavGroup[] = [
       { to: '/qr-payment', label: 'Scanner QR', icon: ScanLine },
       { to: '/cards', label: 'Mes cartes', icon: CreditCard },
       { to: '/beneficiaries', label: 'Bénéficiaires', icon: Users },
+      { to: '/loyalty', label: 'Fidélité', icon: Gift },
       { to: '/bills', label: 'Factures', icon: FileText },
     ],
   },
@@ -70,6 +91,29 @@ const GROUPS: NavGroup[] = [
       { to: '/seller-mode', label: 'Mode vendeur', icon: Store },
       { to: '/merchant-signup', label: 'Devenir marchand', icon: Building2 },
       { to: '/premium', label: 'Premium', icon: Sparkles },
+    ],
+  },
+  {
+    label: 'Espace Marchand',
+    merchantOnly: true,
+    items: [
+      { to: '/merchant', label: 'Tableau marchand', icon: LayoutDashboard, cap: 'dashboard' },
+      { to: '/merchant/payment-links', label: 'Liens de paiement', icon: Link2, cap: 'collect' },
+      { to: '/merchant/qrcode', label: 'QR de paiement', icon: QrCode, cap: 'collect' },
+      { to: '/merchant/scanner', label: 'Scanner client', icon: ScanLine, cap: 'collect' },
+      { to: '/merchant/analytics', label: 'Analytics', icon: BarChart3, cap: 'dashboard' },
+      { to: '/merchant/loyalty', label: 'Fidélité', icon: Gift, cap: 'coupons' },
+      { to: '/merchant/transactions', label: 'Ventes', icon: Receipt, cap: 'transactions' },
+      { to: '/merchant/refunds', label: 'Remboursements', icon: Undo2, cap: 'transactions' },
+      { to: '/merchant/products', label: 'Produits', icon: Package, cap: 'products' },
+      { to: '/merchant/stores', label: 'Boutiques', icon: Store, cap: 'stores' },
+      { to: '/merchant/balance', label: 'Solde', icon: Wallet, cap: 'withdrawals' },
+      { to: '/merchant/withdraw', label: 'Retraits', icon: Wallet, cap: 'withdrawals' },
+      { to: '/merchant/reports', label: 'Rapports & TVA', icon: FileText, cap: 'transactions' },
+      { to: '/merchant/coupons', label: 'Coupons', icon: Ticket, cap: 'coupons' },
+      { to: '/merchant/employees', label: 'Équipe', icon: Users, cap: 'employees' },
+      { to: '/merchant/notifications', label: 'Notifs marchand', icon: Bell, cap: 'dashboard' },
+      { to: '/merchant/help', label: 'Aide', icon: HelpCircle, cap: 'dashboard' },
     ],
   },
   {
@@ -107,8 +151,29 @@ export default function AppLayout() {
   const { unreadCount } = useSocket();
   const [mobileOpen, setMobileOpen] = useState(false);
   const [userMenuOpen, setUserMenuOpen] = useState(false);
+  const [isMerchant, setIsMerchant] = useState(false);
+  const [merchantRole, setMerchantRole] = useState<string>('OWNER');
 
   const isAdmin = (user as any)?.role === 'ADMIN';
+
+  // Statut marchand → affiche l'espace marchand dans la nav + rôle
+  useEffect(() => {
+    let cancelled = false;
+    merchantApi
+      .getStatus()
+      .then((r) => {
+        if (!cancelled) {
+          setIsMerchant(
+            Boolean(r.data?.hasMerchant && r.data?.merchant?.isActive),
+          );
+          setMerchantRole((r.data as any)?.role || 'OWNER');
+        }
+      })
+      .catch(() => {});
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   // Close mobile drawer on route change
   useEffect(() => {
@@ -143,7 +208,7 @@ export default function AppLayout() {
       <div className="relative flex min-h-screen">
         {/* ===== Sidebar desktop ===== */}
         <aside className="hidden lg:flex flex-col w-64 shrink-0 border-r border-bg-border bg-bg-surface/80 backdrop-blur-xl">
-          <SidebarContent isAdmin={isAdmin} unreadCount={unreadCount} />
+          <SidebarContent isAdmin={isAdmin} isMerchant={isMerchant} merchantRole={merchantRole} unreadCount={unreadCount} />
         </aside>
 
         {/* ===== Sidebar mobile (drawer) ===== */}
@@ -154,7 +219,7 @@ export default function AppLayout() {
               onClick={() => setMobileOpen(false)}
             />
             <aside className="fixed inset-y-0 left-0 w-72 max-w-[85vw] bg-bg-surface z-50 flex flex-col border-r border-bg-border lg:hidden animate-fade-in">
-              <SidebarContent isAdmin={isAdmin} unreadCount={unreadCount} onClose={() => setMobileOpen(false)} />
+              <SidebarContent isAdmin={isAdmin} isMerchant={isMerchant} merchantRole={merchantRole} unreadCount={unreadCount} onClose={() => setMobileOpen(false)} />
             </aside>
           </>
         )}
@@ -182,14 +247,25 @@ export default function AppLayout() {
 /* ─────────────────────── Sidebar content ─────────────────────── */
 function SidebarContent({
   isAdmin,
+  isMerchant,
+  merchantRole,
   unreadCount,
   onClose,
 }: {
   isAdmin: boolean;
+  isMerchant: boolean;
+  merchantRole: string;
   unreadCount: number;
   onClose?: () => void;
 }) {
-  const visibleGroups = GROUPS.filter((g) => !g.adminOnly || isAdmin);
+  const allowedCaps = ROLE_CAPS[merchantRole] ?? ROLE_CAPS.OWNER;
+  const visibleGroups = GROUPS.filter(
+    (g) => (!g.adminOnly || isAdmin) && (!g.merchantOnly || isMerchant),
+  ).map((g) =>
+    g.merchantOnly
+      ? { ...g, items: g.items.filter((it) => !it.cap || allowedCaps.includes(it.cap)) }
+      : g,
+  );
 
   return (
     <>
