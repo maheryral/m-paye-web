@@ -50,6 +50,12 @@ async function clearSession() {
     secureStorage.multiRemove(['accessToken', 'refreshToken']),
     asyncStorage.removeItem('user'),
   ]);
+  // 🔄 reset le cache du switch marchand (sinon user suivant croit qu'il est déjà switché)
+  try {
+    localStorage.removeItem('activeMerchantId');
+  } catch {
+    /* localStorage indispo (SSR/test) — pas critique */
+  }
 }
 
 export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {

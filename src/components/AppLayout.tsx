@@ -37,6 +37,7 @@ import {
 } from 'lucide-react';
 import { useEffect, useState } from 'react';
 import { merchantApi } from '../services/merchantApi';
+import { secureStorage } from '../services/storage';
 import { Link, NavLink, Outlet, useLocation, useNavigate } from 'react-router-dom';
 import { Avatar, Button } from '../ui';
 import { useAuth } from '../contexts/AuthContext';
@@ -79,7 +80,6 @@ const GROUPS: NavGroup[] = [
     label: 'Paiements',
     items: [
       { to: '/qr-payment', label: 'Scanner QR', icon: ScanLine },
-      { to: '/cards', label: 'Mes cartes', icon: CreditCard },
       { to: '/beneficiaries', label: 'Bénéficiaires', icon: Users },
       { to: '/loyalty', label: 'Fidélité', icon: Gift },
       { to: '/bills', label: 'Factures', icon: FileText },
@@ -153,10 +153,11 @@ export default function AppLayout() {
   const [userMenuOpen, setUserMenuOpen] = useState(false);
   const [isMerchant, setIsMerchant] = useState(false);
   const [merchantRole, setMerchantRole] = useState<string>('OWNER');
+  const [merchantId, setMerchantId] = useState<string | null>(null);
 
   const isAdmin = (user as any)?.role === 'ADMIN';
 
-  // Statut marchand → affiche l'espace marchand dans la nav + rôle
+  // Statut marchand → affiche l'espace marchand dans la nav + rôle + id
   useEffect(() => {
     let cancelled = false;
     merchantApi
@@ -167,6 +168,7 @@ export default function AppLayout() {
             Boolean(r.data?.hasMerchant && r.data?.merchant?.isActive),
           );
           setMerchantRole((r.data as any)?.role || 'OWNER');
+          setMerchantId(r.data?.merchant?.id ?? null);
         }
       })
       .catch(() => {});
@@ -174,6 +176,37 @@ export default function AppLayout() {
       cancelled = true;
     };
   }, []);
+
+  // 🔑 Switch JWT vers contexte marchand quand on entre dans /merchant/*
+  // (le backend a besoin de activeMerchantId dans le JWT pour /qr/generate,
+  // /merchant/* etc. Sans ça → 400 "merchantId manquant").
+  // On cache l'id du dernier switch en localStorage pour ne pas re-switch
+  // à chaque page interne.
+  useEffect(() => {
+    if (!isMerchant || !merchantId) return;
+    if (!location.pathname.startsWith('/merchant')) return;
+    if (localStorage.getItem('activeMerchantId') === merchantId) return;
+
+    let cancelled = false;
+    (async () => {
+      try {
+        const res = await merchantApi.switch(merchantId);
+        if (cancelled) return;
+        await secureStorage.setItem('accessToken', res.data.accessToken);
+        await secureStorage.setItem('refreshToken', res.data.refreshToken);
+        localStorage.setItem('activeMerchantId', merchantId);
+      } catch (e: any) {
+        console.warn(
+          '[MERCHANT switch KO]',
+          e?.response?.status,
+          e?.response?.data || e?.message,
+        );
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [isMerchant, merchantId, location.pathname]);
 
   // Close mobile drawer on route change
   useEffect(() => {

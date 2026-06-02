@@ -22,6 +22,7 @@ import {
 } from 'lucide-react';
 import { QRCodeCanvas } from 'qrcode.react';
 import { useEffect, useMemo, useRef, useState } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../../contexts/AuthContext';
 import { useLocale } from '../../contexts/LocaleContext';
 import { useWallet } from '../../contexts/WalletContext';
@@ -39,6 +40,7 @@ interface Scanned {
 }
 
 export default function QrPayment() {
+  const navigate = useNavigate();
   const { user } = useAuth();
   const { balance, fetchBalance } = useWallet();
   const { formatCurrency } = useLocale();
@@ -105,6 +107,16 @@ export default function QrPayment() {
     return null;
   };
 
+  // Extrait une référence Payment Link (PL-...) depuis un payload brut ou une URL
+  // (ex: "http://host/pay/PL-1780407003574-e7e7ee91" ou juste "PL-...")
+  const extractPaymentLinkRef = (raw: string): string | null => {
+    const trimmed = raw.trim();
+    if (/^PL-\d+-[a-z0-9]+$/i.test(trimmed)) return trimmed;
+    const m = trimmed.match(/\/pay\/(PL-\d+-[a-z0-9]+)/i);
+    if (m) return m[1];
+    return null;
+  };
+
   // Charge le récap d'un QR marchand pour preview
   const loadMerchantQr = async (reference: string) => {
     setMerchantQrLoading(true);
@@ -124,11 +136,16 @@ export default function QrPayment() {
     }
   };
 
-  // Route un payload scanné vers le bon flow (QR marchand, JSON p2p, email)
+  // Route un payload scanné vers le bon flow (QR marchand, Payment Link, JSON p2p, email)
   const processScanned = (raw: string) => {
     const merchantRef = extractMerchantQrRef(raw);
     if (merchantRef) {
       void loadMerchantQr(merchantRef);
+      return;
+    }
+    const plRef = extractPaymentLinkRef(raw);
+    if (plRef) {
+      navigate(`/pay/${plRef}`);
       return;
     }
     try {
@@ -147,6 +164,15 @@ export default function QrPayment() {
         setScanned({ email: raw, name: raw.split('@')[0] });
         return;
       }
+      // 🐛 Log le contenu brut + ses bytes pour debug (chars invisibles, BOM, etc.)
+      console.warn(
+        '[QR non reconnu] raw =',
+        JSON.stringify(raw),
+        'length =',
+        raw.length,
+        'codepoints =',
+        Array.from(raw).slice(0, 60).map((c) => c.charCodeAt(0).toString(16)).join(' '),
+      );
       alert("QR non reconnu comme un code de paiement M'Paye");
       setScanning(true);
     }

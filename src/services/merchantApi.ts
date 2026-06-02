@@ -259,9 +259,23 @@ export interface LoyaltyAccountDetail {
   history: LoyaltyHistoryEntry[];
 }
 
+export interface MerchantSwitchResponse {
+  accessToken: string;
+  refreshToken: string;
+  merchantId: string;
+}
+
 export const merchantApi = {
   // Statut & profil
   getStatus: () => api.get<MerchantStatusResponse>('/merchant/status'),
+
+  /**
+   * Bascule le JWT vers le contexte marchand. Le nouveau token porte
+   * activeMerchantId requis par /qr/generate et autres routes marchand.
+   * Le client DOIT sauvegarder les nouveaux tokens dans le storage.
+   */
+  switch: (merchantId: string) =>
+    api.post<MerchantSwitchResponse>('/merchants/switch', { merchantId }),
   getProfile: () => api.get<MerchantProfile>('/merchant/profile'),
   upgradeRequest: (data: FormData) =>
     api.post('/merchants', data, {

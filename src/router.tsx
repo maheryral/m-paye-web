@@ -12,7 +12,6 @@ import AdminPayments from './pages/app/AdminPayments';
 import AdminRevenue from './pages/app/AdminRevenue';
 import Beneficiaries from './pages/app/Beneficiaries';
 import Bills from './pages/app/Bills';
-import Cards from './pages/app/Cards';
 import Chat from './pages/app/Chat';
 import CompleteProfile from './pages/app/CompleteProfile';
 import FaceLiveness from './pages/app/FaceLiveness';
@@ -94,7 +93,6 @@ export const router = createBrowserRouter([
       { path: '/transfers', element: <Transfers /> },
       { path: '/history', element: <History /> },
       { path: '/qr-payment', element: <QrPayment /> },
-      { path: '/cards', element: <Cards /> },
       { path: '/beneficiaries', element: <Beneficiaries /> },
       { path: '/loyalty', element: <Loyalty /> },
       { path: '/bills', element: <Bills /> },

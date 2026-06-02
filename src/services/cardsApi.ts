@@ -6,6 +6,12 @@ export interface SavedCard {
   last4: string;
   expiration: string;
   isDefault: boolean;
+  /**
+   * Id Stripe `pm_xxx` (public, non secret) — utilisable directement dans
+   * `stripe.confirmCardPayment({ payment_method })` pour charger la carte
+   * sauvegardée sans re-saisir.
+   */
+  stripePaymentMethodId?: string | null;
 }
 
 export interface SetupIntentResponse {
