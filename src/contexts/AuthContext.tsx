@@ -1,5 +1,6 @@
 import React, { createContext, useContext, useEffect, useState } from 'react';
 import { accountService, authService } from '../services/api';
+import { sessionEvents } from '../services/sessionEvents';
 import { asyncStorage, secureStorage } from '../services/storage';
 
 export interface User {
@@ -66,12 +67,33 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     void loadUser();
   }, []);
 
+  /**
+   * Écoute les expirations de session (refresh token KO côté serveur).
+   * api.ts émet l'événement après avoir wipe les tokens — ici on reset
+   * le state React pour éviter de garder un "faux user" avant le hard redirect.
+   */
+  useEffect(() => {
+    const unsubscribe = sessionEvents.onExpired(() => {
+      setUser(null);
+    });
+    return unsubscribe;
+  }, []);
+
   const loadUser = async () => {
     try {
-      const token = await secureStorage.getItem('accessToken');
-      const storedUser = await asyncStorage.getItem('user');
-      if (token && storedUser) {
+      const [accessToken, refreshToken, storedUser] = await Promise.all([
+        secureStorage.getItem('accessToken'),
+        secureStorage.getItem('refreshToken'),
+        asyncStorage.getItem('user'),
+      ]);
+      // 🔐 Exige les 3 — sinon session incohérente (cas typique : tokens wipés
+      // par un précédent refresh KO mais 'user' resté → faux état authentifié
+      // qui spam des 401 jusqu'à la redirection).
+      if (accessToken && refreshToken && storedUser) {
         setUser(JSON.parse(storedUser));
+      } else if (storedUser || accessToken || refreshToken) {
+        // État partiel → on nettoie pour repartir propre
+        await clearSession();
       }
     } catch (error) {
       console.error('Erreur chargement user:', error);
@@ -87,12 +109,12 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
   const login = async (identifier: string, password: string) => {
     const response = await authService.login({ login: identifier, password });
-    if (response?.accessToken && response?.user) {
-      await persistSession(response.accessToken, response.refreshToken, response.user);
-      setUser(response.user);
-    } else {
-      throw new Error('Réponse de connexion invalide');
+    if (!response?.accessToken || !response?.refreshToken || !response?.user) {
+      console.warn('[LOGIN] Réponse invalide — clés:', Object.keys(response ?? {}));
+      throw new Error('Réponse de connexion invalide (tokens manquants)');
     }
+    await persistSession(response.accessToken, response.refreshToken, response.user);
+    setUser(response.user);
   };
 
   const setUserFromTokens = async (accessToken: string, refreshToken: string, userData: User) => {

@@ -1,6 +1,7 @@
 import axios, { AxiosError, type InternalAxiosRequestConfig } from 'axios';
 import { API_BASE_URL, REQUEST_TIMEOUT_MS } from '../config/env';
 import { asyncStorage, getOrCreateDeviceId, secureStorage } from './storage';
+import { sessionEvents } from './sessionEvents';
 
 const api = axios.create({
   baseURL: API_BASE_URL,
@@ -25,13 +26,35 @@ let refreshPromise: Promise<string> | null = null;
 api.interceptors.response.use(
   (response) => response,
   async (error: AxiosError) => {
-    const originalRequest = error.config as (InternalAxiosRequestConfig & { _retry?: boolean }) | undefined;
-    if (error.response?.status === 401 && originalRequest && !originalRequest._retry) {
+    const originalRequest = error.config as
+      | (InternalAxiosRequestConfig & { _retry?: boolean })
+      | undefined;
+
+    // 🐛 Log des 4xx/5xx pour debug rapide (URL + statut + payload)
+    if (error.response && (error.response.status >= 400 || error.response.status === 0)) {
+      console.warn(
+        `[API ${error.response.status}] ${originalRequest?.method?.toUpperCase()} ${originalRequest?.baseURL ?? ''}${originalRequest?.url}`,
+        error.response.data,
+      );
+    }
+
+    // Évite de boucler si c'est /auth/refresh lui-même qui a échoué
+    const isRefreshCall = originalRequest?.url?.includes('/auth/refresh');
+
+    if (
+      error.response?.status === 401 &&
+      originalRequest &&
+      !originalRequest._retry &&
+      !isRefreshCall
+    ) {
       originalRequest._retry = true;
       try {
         if (!refreshPromise) {
           refreshPromise = (async () => {
             const refreshToken = await secureStorage.getItem('refreshToken');
+            if (!refreshToken) {
+              throw new Error('Pas de refresh token en storage');
+            }
             const deviceId = await getOrCreateDeviceId();
             const response = await axios.post(
               `${API_BASE_URL}/auth/refresh`,
@@ -43,17 +66,29 @@ api.interceptors.response.use(
               await secureStorage.setItem('refreshToken', response.data.refreshToken);
               return response.data.accessToken as string;
             }
-            throw new Error('Refresh failed');
+            throw new Error(
+              `Refresh: réponse invalide (clés manquantes) - keys=${Object.keys(response.data || {}).join(',')}`,
+            );
           })();
         }
         const newAccessToken = await refreshPromise;
         refreshPromise = null;
         originalRequest.headers.Authorization = `Bearer ${newAccessToken}`;
         return api(originalRequest);
-      } catch {
+      } catch (refreshErr: any) {
         refreshPromise = null;
+        // 🔴 LOG diagnostic : sans ça, le wipe + redirect masque la cause exacte
+        console.warn(
+          '[AUTH refresh KO]',
+          refreshErr?.response?.status,
+          refreshErr?.response?.data || refreshErr?.message,
+        );
+        // 🧹 Logout complet (tokens + user)
         await secureStorage.multiRemove(['accessToken', 'refreshToken']);
         await asyncStorage.removeItem('user');
+        // 📣 Notifie AuthContext pour reset user state
+        sessionEvents.emitExpired();
+        // 🚪 Hard redirect en backup (reset complet de l'app)
         if (typeof window !== 'undefined' && !window.location.pathname.startsWith('/auth')) {
           window.location.href = '/auth/login';
         }
@@ -118,8 +153,12 @@ export const accountService = {
 export const transactionService = {
   getTransactions: (params?: any) =>
     api.get('/transactions', { params }).then((r) => r.data),
-  transfer: (data: any) =>
-    api.post('/transactions/transfer', data).then((r) => r.data),
+  transfer: (data: any, idempotencyKey?: string) =>
+    api
+      .post('/transactions/transfer', data, {
+        headers: idempotencyKey ? { 'Idempotency-Key': idempotencyKey } : {},
+      })
+      .then((r) => r.data),
   searchUserByEmail: (email: string) =>
     api.get(`/user/search?email=${email}`).then((r) => r.data),
   searchUserByPhone: (phone: string) =>

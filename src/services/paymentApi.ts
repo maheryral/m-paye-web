@@ -22,6 +22,7 @@ export interface PaymentRequest {
   reference: string;
   rejectionReason?: string | null;
   adminNotes?: string | null;
+  payoutReference?: string | null;
   createdAt: string;
   updatedAt: string;
   expiresAt?: string | null;
@@ -56,8 +57,11 @@ export const paymentApi = {
 
   listPending: () => api.get<PaymentRequest[]>('/payment-requests/admin/pending'),
   listAll: () => api.get<PaymentRequest[]>('/payment-requests/admin/all'),
-  approve: (id: string, adminNotes?: string) =>
-    api.patch<PaymentRequest>(`/payment-requests/admin/${id}/approve`, { adminNotes }),
+  approve: (
+    id: string,
+    body?: { adminNotes?: string; payoutReference?: string },
+  ) =>
+    api.patch<PaymentRequest>(`/payment-requests/admin/${id}/approve`, body ?? {}),
   reject: (id: string, rejectionReason: string) =>
     api.patch<PaymentRequest>(`/payment-requests/admin/${id}/reject`, { rejectionReason }),
 

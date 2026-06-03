@@ -57,6 +57,11 @@ export default function AdminPayments() {
   const [rejectReason, setRejectReason] = useState('');
   const [busy, setBusy] = useState<string | null>(null);
 
+  // Modal d'approbation avec saisie de la référence externe (USSD MVola, RIB, etc.)
+  const [approving, setApproving] = useState<PaymentRequest | null>(null);
+  const [payoutRef, setPayoutRef] = useState('');
+  const [approveNotes, setApproveNotes] = useState('');
+
   const load = useCallback(async () => {
     if (!isAdmin) {
       setLoading(false);
@@ -117,18 +122,49 @@ export default function AdminPayments() {
     return res;
   }, [items, filter, search]);
 
-  const approve = async (id: string) => {
-    if (!confirm('Approuver cette demande ?')) return;
+  /**
+   * Démarre l'approbation : si c'est un retrait ou un dépôt manuel (autre que CARD),
+   * ouvre le modal pour saisir la référence du payout externe (réf USSD MVola,
+   * n° virement bancaire, code agent cash). Sinon (dépôt CARD), on confirme direct.
+   */
+  const startApprove = (r: PaymentRequest) => {
+    const needsRef = r.type === 'WITHDRAWAL' || r.method !== 'CARD';
+    if (!needsRef) {
+      if (!confirm('Approuver cette demande ?')) return;
+      void doApprove(r.id, {});
+      return;
+    }
+    setApproving(r);
+    setPayoutRef('');
+    setApproveNotes('');
+  };
+
+  /** Envoie l'approbation au backend avec la référence + notes éventuelles. */
+  const doApprove = async (
+    id: string,
+    body: { payoutReference?: string; adminNotes?: string },
+  ) => {
     setBusy(id);
     try {
-      await paymentApi.approve(id);
+      await paymentApi.approve(id, body);
       await load();
       if (selected?.id === id) setSelected(null);
+      setApproving(null);
+      setPayoutRef('');
+      setApproveNotes('');
     } catch (e: any) {
       alert(e?.response?.data?.message || 'Approbation échouée');
     } finally {
       setBusy(null);
     }
+  };
+
+  const confirmApproveWithRef = () => {
+    if (!approving) return;
+    void doApprove(approving.id, {
+      payoutReference: payoutRef.trim() || undefined,
+      adminNotes: approveNotes.trim() || undefined,
+    });
   };
 
   const reject = async () => {
@@ -350,7 +386,7 @@ export default function AdminPayments() {
                               size="sm"
                               icon={Check}
                               loading={busy === r.id}
-                              onClick={() => approve(r.id)}
+                              onClick={() => startApprove(r)}
                             >
                               Approuver
                             </Button>
@@ -426,7 +462,7 @@ export default function AdminPayments() {
                           fullWidth
                           icon={Check}
                           loading={busy === r.id}
-                          onClick={() => approve(r.id)}
+                          onClick={() => startApprove(r)}
                         >
                           Approuver
                         </Button>
@@ -453,6 +489,20 @@ export default function AdminPayments() {
         )}
       </Card>
 
+      {/* Modal d'approbation avec saisie de référence externe (USSD MVola, etc.) */}
+      {approving && (
+        <ApproveModal
+          req={approving}
+          payoutRef={payoutRef}
+          setPayoutRef={setPayoutRef}
+          adminNotes={approveNotes}
+          setAdminNotes={setApproveNotes}
+          busy={busy === approving.id}
+          onClose={() => setApproving(null)}
+          onConfirm={confirmApproveWithRef}
+        />
+      )}
+
       {/* Slide-over details + reject */}
       {selected && (
         <DetailsPanel
@@ -465,7 +515,7 @@ export default function AdminPayments() {
             setSelected(null);
             setRejectMode(false);
           }}
-          onApprove={() => approve(selected.id)}
+          onApprove={() => startApprove(selected)}
           onReject={() => setRejectMode(true)}
           onConfirmReject={reject}
         />
@@ -711,6 +761,182 @@ function DetailRow({ label, children }: { label: string; children: React.ReactNo
     <div className="flex justify-between items-center py-2 border-b border-bg-border/50 last:border-0">
       <span className="text-xs text-ink-muted capitalize">{label}</span>
       <span className="text-sm text-ink text-right truncate max-w-[60%]">{children}</span>
+    </div>
+  );
+}
+
+/**
+ * Modal d'approbation d'un retrait/dépôt manuel.
+ * L'admin fait le payout HORS APP (USSD MVola depuis son téléphone, virement
+ * bancaire, etc.) puis colle la référence/preuve ici. Cette référence sera :
+ *  - persistée en DB (`payoutReference`)
+ *  - affichée dans la notification user ("Réf : MVOLA-XXXX")
+ *  - retrouvable côté opérateur en cas de litige
+ */
+function ApproveModal({
+  req,
+  payoutRef,
+  setPayoutRef,
+  adminNotes,
+  setAdminNotes,
+  busy,
+  onClose,
+  onConfirm,
+}: {
+  req: PaymentRequest;
+  payoutRef: string;
+  setPayoutRef: (v: string) => void;
+  adminNotes: string;
+  setAdminNotes: (v: string) => void;
+  busy: boolean;
+  onClose: () => void;
+  onConfirm: () => void;
+}) {
+  // Suggestion contextuelle selon la méthode
+  const refHints: Record<string, { label: string; placeholder: string; hint: string }> = {
+    MOBILE_MONEY: {
+      label: 'Référence USSD Mobile Money',
+      placeholder: 'Ex: MP240115.1234.A12345',
+      hint: "Numéro de transaction reçu par SMS après le transfert *111# (MVola), Airtel Money ou Orange Money.",
+    },
+    BANK: {
+      label: 'Référence de virement bancaire',
+      placeholder: 'Ex: VIR-20260603-789456',
+      hint: "Référence donnée par votre banque (BNI, BFV, BOA…) après émission du virement.",
+    },
+    CASH: {
+      label: 'Code agent / reçu cash',
+      placeholder: 'Ex: AG-0042-RECU-789',
+      hint: "Code remis par l'agent ou numéro du reçu d'espèces.",
+    },
+    CARD: {
+      label: 'Référence Stripe',
+      placeholder: 'Ex: pi_3OabcDeFGHi456',
+      hint: 'PaymentIntent ID Stripe (optionnel — déjà tracé automatiquement).',
+    },
+  };
+  const hint = refHints[req.method] ?? refHints.MOBILE_MONEY;
+  const isWithdrawal = req.type === 'WITHDRAWAL';
+
+  useEffect(() => {
+    const handler = (e: KeyboardEvent) => {
+      if (e.key === 'Escape' && !busy) onClose();
+    };
+    document.addEventListener('keydown', handler);
+    return () => document.removeEventListener('keydown', handler);
+  }, [onClose, busy]);
+
+  return (
+    <div className="fixed inset-0 z-50 bg-black/70 backdrop-blur-sm flex items-center justify-center p-4 animate-fade-in">
+      <Card padding="lg" className="max-w-lg w-full animate-slide-in">
+        <div className="flex items-center justify-between mb-4">
+          <div>
+            <div className="flex items-center gap-2">
+              <ShieldCheck size={18} className="text-success-400" />
+              <div className="text-base font-bold">
+                Approuver {isWithdrawal ? 'le retrait' : 'le dépôt'}
+              </div>
+            </div>
+            <div className="text-xs text-ink-muted mt-0.5 font-mono">
+              {req.reference}
+            </div>
+          </div>
+          <button
+            onClick={onClose}
+            disabled={busy}
+            className="p-2 -mr-2 rounded-lg hover:bg-bg-elevated text-ink-muted hover:text-ink"
+          >
+            <X size={16} />
+          </button>
+        </div>
+
+        {/* Récap montant + bénéficiaire */}
+        <div className="rounded-xl bg-bg-elevated p-4 mb-4 space-y-1.5">
+          <div className="flex justify-between text-sm">
+            <span className="text-ink-muted">Montant</span>
+            <span className="font-bold">
+              {Number(req.amount).toLocaleString('fr-FR')} Ar
+            </span>
+          </div>
+          <div className="flex justify-between text-sm">
+            <span className="text-ink-muted">Méthode</span>
+            <span className="font-semibold">{req.method}</span>
+          </div>
+          <div className="flex justify-between text-sm">
+            <span className="text-ink-muted">Bénéficiaire</span>
+            <span className="font-semibold truncate ml-2">
+              {`${req.user?.prenom || ''} ${req.user?.nom || ''}`.trim() || req.user?.email}
+            </span>
+          </div>
+          {req.details && Object.keys(req.details).length > 0 && (
+            <div className="pt-2 mt-2 border-t border-bg-border space-y-1">
+              {Object.entries(req.details).map(([k, v]) => (
+                <div key={k} className="flex justify-between text-xs">
+                  <span className="text-ink-dim capitalize">{k}</span>
+                  <span className="text-ink truncate ml-2 font-mono">{String(v)}</span>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+
+        {isWithdrawal && (
+          <div className="flex items-start gap-2 p-3 mb-4 rounded-lg border border-warning-500/30 bg-warning-bg">
+            <Hourglass size={14} className="text-warning-400 shrink-0 mt-0.5" />
+            <p className="text-xs leading-relaxed">
+              Effectuez d'abord le transfert sur le téléphone/banque, puis collez
+              la référence ci-dessous. Le wallet du user ne sera débité qu'après
+              confirmation.
+            </p>
+          </div>
+        )}
+
+        {/* Saisie référence */}
+        <div className="mb-3">
+          <label className="label">{hint.label}</label>
+          <Input
+            placeholder={hint.placeholder}
+            value={payoutRef}
+            onChange={(e) => setPayoutRef(e.target.value)}
+            autoFocus
+          />
+          <p className="text-[11px] text-ink-dim mt-1.5">{hint.hint}</p>
+        </div>
+
+        {/* Notes admin (optionnel) */}
+        <div className="mb-4">
+          <label className="label">Note interne (optionnel)</label>
+          <textarea
+            rows={2}
+            placeholder="Visible uniquement par les admins…"
+            value={adminNotes}
+            onChange={(e) => setAdminNotes(e.target.value)}
+            className="input resize-none"
+          />
+        </div>
+
+        <div className="flex gap-2">
+          <Button
+            variant="secondary"
+            size="md"
+            fullWidth
+            disabled={busy}
+            onClick={onClose}
+          >
+            Annuler
+          </Button>
+          <Button
+            variant="success"
+            size="md"
+            fullWidth
+            loading={busy}
+            icon={Check}
+            onClick={onConfirm}
+          >
+            Confirmer l'approbation
+          </Button>
+        </div>
+      </Card>
     </div>
   );
 }

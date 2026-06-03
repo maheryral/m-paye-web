@@ -156,11 +156,18 @@ export default function Transfers() {
     setLoading(true);
     try {
       const to = recipient.email || recipient.telephone || '';
-      await transactionService.transfer({
-        toPhone: to,
-        amount: amountNum,
-        motif: motif || 'Transfert M\'Paye',
-      });
+      // 🔒 Idempotency-Key : si l'user double-clique ou retry network, le 2e
+      // POST réutilise la même clé → le backend rejette ('Transaction déjà
+      // exécutée') au lieu de débiter deux fois.
+      const idem = `tx-${to}-${amountNum}-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+      await transactionService.transfer(
+        {
+          toPhone: to,
+          amount: amountNum,
+          motif: motif || 'Transfert M\'Paye',
+        },
+        idem,
+      );
       await fetchBalance();
       setConfirmOpen(false);
       setSuccess({

@@ -239,7 +239,16 @@ export default function QrPayment() {
         setScanning(true);
       }, 2500);
     } catch (e: any) {
-      alert(e?.response?.data?.message || 'Paiement refusé');
+      console.error(
+        '[QR pay KO]',
+        'status=', e?.response?.status,
+        'data=', e?.response?.data,
+        'message=', e?.message,
+      );
+      alert(
+        e?.response?.data?.message ||
+          `Paiement refusé (${e?.response?.status ?? 'réseau'})`,
+      );
     } finally {
       setMerchantQrLoading(false);
     }
@@ -265,11 +274,16 @@ export default function QrPayment() {
     if (!identifier) return alert('Destinataire incomplet');
     setPaying(true);
     try {
-      await transactionService.transfer({
-        toPhone: identifier,
-        amount: amt,
-        motif: 'Paiement QR',
-      });
+      // 🔒 Idempotency-Key contre les double-clics et retry réseau.
+      const idem = `qr-tx-${identifier}-${amt}-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+      await transactionService.transfer(
+        {
+          toPhone: identifier,
+          amount: amt,
+          motif: 'Paiement QR',
+        },
+        idem,
+      );
       await fetchBalance();
       await loadRecent();
       setSuccess({ amt, to: scanned.name || identifier });

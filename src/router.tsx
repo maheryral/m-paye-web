@@ -24,7 +24,6 @@ import MerchantBalance from './pages/app/merchant/Balance';
 import MerchantCoupons from './pages/app/merchant/Coupons';
 import MerchantPaymentLinks from './pages/app/merchant/PaymentLinks';
 import MerchantLoyalty from './pages/app/merchant/Loyalty';
-import MerchantQrCode from './pages/app/merchant/QrCode';
 import MerchantWithdraw from './pages/app/merchant/Withdraw';
 import MerchantRefunds from './pages/app/merchant/Refunds';
 import MerchantScanner from './pages/app/merchant/Scanner';
@@ -100,7 +99,6 @@ export const router = createBrowserRouter([
       { path: '/merchant-signup', element: <MerchantSignup /> },
       { path: '/merchant', element: <MerchantDashboard /> },
       { path: '/merchant/payment-links', element: <MerchantPaymentLinks /> },
-      { path: '/merchant/qrcode', element: <MerchantQrCode /> },
       { path: '/merchant/scanner', element: <MerchantScanner /> },
       { path: '/merchant/analytics', element: <MerchantAnalytics /> },
       { path: '/merchant/withdraw', element: <MerchantWithdraw /> },

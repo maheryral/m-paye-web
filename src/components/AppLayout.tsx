@@ -1,5 +1,6 @@
 import {
   AppWindow,
+  ArrowLeft,
   Bell,
   Building2,
   Cable,
@@ -88,6 +89,9 @@ const GROUPS: NavGroup[] = [
   {
     label: 'Marchand',
     items: [
+      // ⇣ Items filtrés dynamiquement dans SidebarContent :
+      //   • 'Devenir marchand' : caché si l'user a déjà un marchand
+      //   • 'Passer en mode marchand' : injecté si l'user a un marchand
       { to: '/seller-mode', label: 'Mode vendeur', icon: Store },
       { to: '/merchant-signup', label: 'Devenir marchand', icon: Building2 },
       { to: '/premium', label: 'Premium', icon: Sparkles },
@@ -99,7 +103,6 @@ const GROUPS: NavGroup[] = [
     items: [
       { to: '/merchant', label: 'Tableau marchand', icon: LayoutDashboard, cap: 'dashboard' },
       { to: '/merchant/payment-links', label: 'Liens de paiement', icon: Link2, cap: 'collect' },
-      { to: '/merchant/qrcode', label: 'QR de paiement', icon: QrCode, cap: 'collect' },
       { to: '/merchant/scanner', label: 'Scanner client', icon: ScanLine, cap: 'collect' },
       { to: '/merchant/analytics', label: 'Analytics', icon: BarChart3, cap: 'dashboard' },
       { to: '/merchant/loyalty', label: 'Fidélité', icon: Gift, cap: 'coupons' },
@@ -156,6 +159,9 @@ export default function AppLayout() {
   const [merchantId, setMerchantId] = useState<string | null>(null);
 
   const isAdmin = (user as any)?.role === 'ADMIN';
+  // Mode marchand = on est sur une route /merchant/*. Filtre la sidebar pour
+  // n'afficher que les items pertinents (pas mélanger client + marchand).
+  const isMerchantMode = location.pathname.startsWith('/merchant');
 
   // Statut marchand → affiche l'espace marchand dans la nav + rôle + id
   useEffect(() => {
@@ -241,7 +247,13 @@ export default function AppLayout() {
       <div className="relative flex min-h-screen">
         {/* ===== Sidebar desktop ===== */}
         <aside className="hidden lg:flex flex-col w-64 shrink-0 border-r border-bg-border bg-bg-surface/80 backdrop-blur-xl">
-          <SidebarContent isAdmin={isAdmin} isMerchant={isMerchant} merchantRole={merchantRole} unreadCount={unreadCount} />
+          <SidebarContent
+            isAdmin={isAdmin}
+            isMerchant={isMerchant}
+            isMerchantMode={isMerchantMode}
+            merchantRole={merchantRole}
+            unreadCount={unreadCount}
+          />
         </aside>
 
         {/* ===== Sidebar mobile (drawer) ===== */}
@@ -252,7 +264,14 @@ export default function AppLayout() {
               onClick={() => setMobileOpen(false)}
             />
             <aside className="fixed inset-y-0 left-0 w-72 max-w-[85vw] bg-bg-surface z-50 flex flex-col border-r border-bg-border lg:hidden animate-fade-in">
-              <SidebarContent isAdmin={isAdmin} isMerchant={isMerchant} merchantRole={merchantRole} unreadCount={unreadCount} onClose={() => setMobileOpen(false)} />
+              <SidebarContent
+                isAdmin={isAdmin}
+                isMerchant={isMerchant}
+                isMerchantMode={isMerchantMode}
+                merchantRole={merchantRole}
+                unreadCount={unreadCount}
+                onClose={() => setMobileOpen(false)}
+              />
             </aside>
           </>
         )}
@@ -281,24 +300,54 @@ export default function AppLayout() {
 function SidebarContent({
   isAdmin,
   isMerchant,
+  isMerchantMode,
   merchantRole,
   unreadCount,
   onClose,
 }: {
   isAdmin: boolean;
   isMerchant: boolean;
+  isMerchantMode: boolean;
   merchantRole: string;
   unreadCount: number;
   onClose?: () => void;
 }) {
   const allowedCaps = ROLE_CAPS[merchantRole] ?? ROLE_CAPS.OWNER;
-  const visibleGroups = GROUPS.filter(
-    (g) => (!g.adminOnly || isAdmin) && (!g.merchantOnly || isMerchant),
-  ).map((g) =>
-    g.merchantOnly
-      ? { ...g, items: g.items.filter((it) => !it.cap || allowedCaps.includes(it.cap)) }
-      : g,
-  );
+
+  const visibleGroups = GROUPS.filter((g) => {
+    if (g.adminOnly && !isAdmin) return false;
+    // Espace Marchand n'apparaît qu'en mode marchand (et que si l'user est marchand)
+    if (g.merchantOnly) return isMerchant && isMerchantMode;
+    // En mode marchand, on cache les groupes "client" (Comptes, Paiements, Marchand, Services)
+    // pour ne pas mélanger les deux contextes. Admin reste accessible.
+    if (isMerchantMode && !g.adminOnly) return false;
+    return true;
+  }).map((g) => {
+    // Filtrage des capacités côté Espace Marchand
+    if (g.merchantOnly) {
+      return {
+        ...g,
+        items: g.items.filter((it) => !it.cap || allowedCaps.includes(it.cap)),
+      };
+    }
+    // Groupe "Marchand" en mode client :
+    //   • cache 'Devenir marchand' si l'user a déjà un marchand
+    //   • injecte 'Passer en mode marchand' en tête si l'user a un marchand
+    if (g.label === 'Marchand' && !isMerchantMode) {
+      const items = g.items.filter(
+        (it) => !(it.to === '/merchant-signup' && isMerchant),
+      );
+      if (isMerchant) {
+        items.unshift({
+          to: '/merchant',
+          label: 'Passer en mode marchand',
+          icon: LayoutDashboard,
+        });
+      }
+      return { ...g, items };
+    }
+    return g;
+  });
 
   return (
     <>
@@ -328,6 +377,17 @@ function SidebarContent({
 
       {/* Nav */}
       <nav className="flex-1 overflow-y-auto px-3 py-4 space-y-5">
+        {/* Mode marchand : bouton de retour vers la vue client */}
+        {isMerchantMode && (
+          <Link
+            to="/dashboard"
+            onClick={onClose}
+            className="flex items-center gap-2 px-3 py-2 rounded-lg bg-brand-500/15 border border-brand-500/30 text-brand-300 hover:bg-brand-500/20 transition text-sm font-semibold"
+          >
+            <ArrowLeft size={15} />
+            Retour mode client
+          </Link>
+        )}
         {visibleGroups.map((group) => (
           <div key={group.label}>
             <div className="section-title px-3 mb-1.5">{group.label}</div>

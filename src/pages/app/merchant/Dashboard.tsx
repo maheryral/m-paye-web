@@ -178,11 +178,6 @@ export default function MerchantDashboard() {
           <h3 className="text-base font-bold mb-4">Raccourcis</h3>
           <div className="space-y-2">
             <QuickLink
-              icon={QrCode}
-              label="QR de paiement"
-              onClick={() => navigate('/merchant/qrcode')}
-            />
-            <QuickLink
               icon={Package}
               label="Mes produits"
               onClick={() => navigate('/merchant/products')}
