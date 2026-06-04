@@ -83,7 +83,7 @@ const GROUPS: NavGroup[] = [
       { to: '/qr-payment', label: 'Scanner QR', icon: ScanLine },
       { to: '/beneficiaries', label: 'Bénéficiaires', icon: Users },
       { to: '/loyalty', label: 'Fidélité', icon: Gift },
-      { to: '/bills', label: 'Factures', icon: FileText },
+      { to: '/bills', label: 'Services', icon: FileText },
     ],
   },
   {
@@ -124,8 +124,6 @@ const GROUPS: NavGroup[] = [
     items: [
       { to: '/messages', label: 'Messages', icon: MessageSquare, badge: 'unread' },
       { to: '/notifications', label: 'Notifications', icon: Bell, badge: 'unread' },
-      { to: '/taxi-brousse', label: 'Taxi-brousse', icon: Cable },
-      { to: '/telepherique', label: 'Téléphérique', icon: Cable },
       { to: '/train', label: 'Train', icon: AppWindow },
       { to: '/hotels', label: 'Hôtels', icon: Building2 },
       { to: '/flight-booking', label: 'Vols', icon: Plane },

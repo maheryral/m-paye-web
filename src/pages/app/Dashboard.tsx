@@ -20,6 +20,7 @@ import {
 } from 'lucide-react';
 import { useEffect, useMemo, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
+import ServicesScroller from '../../components/ServicesScroller';
 import { useAuth } from '../../contexts/AuthContext';
 import { useLocale } from '../../contexts/LocaleContext';
 import { useWallet } from '../../contexts/WalletContext';
@@ -186,6 +187,9 @@ export default function Dashboard() {
             })}
           </div>
         </Card>
+
+        {/* 🆕 Services dynamiques (chips Home Apps + types + grille billers) */}
+        <ServicesScroller maxItems={7} />
 
         {/* Right rail: cards preview + premium upsell */}
         <div className="space-y-4">

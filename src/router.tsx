@@ -56,6 +56,14 @@ import TelepheriqueTickets from './pages/app/TelepheriqueTickets';
 import Train from './pages/app/Train';
 import Transfers from './pages/app/Transfers';
 
+// Mini-programs (billers)
+import JiramaMiniProgram from './pages/apps/Jirama';
+import HotelsMiniProgram from './pages/apps/Hotels';
+
+// OAuth Partners
+import OauthConsent from './pages/oauth/Consent';
+import TradePay from './pages/trade/TradePay';
+
 import NotFound from './pages/NotFound';
 
 const guest = (el: React.ReactNode) => <GuestOnlyRoute>{el}</GuestOnlyRoute>;
@@ -75,6 +83,32 @@ export const router = createBrowserRouter([
     element: (
       <ProtectedRoute>
         <PayLink />
+      </ProtectedRoute>
+    ),
+  },
+
+  // ─── OAuth Partners — page de consentement ───
+  // Le partenaire externe redirige l'user vers /oauth/consent?app_id=...
+  // L'user doit être loggé dans M'Paye. ProtectedRoute renvoie vers /auth/login
+  // puis revient ici (avec les query params préservés).
+  {
+    path: '/oauth/consent',
+    element: (
+      <ProtectedRoute>
+        <OauthConsent />
+      </ProtectedRoute>
+    ),
+  },
+
+  // ─── Trade payment — page initiée par un partenaire OAuth ───
+  // Le partenaire crée le trade en backend puis redirige l'user ici :
+  //   /trade/pay?trade_no=TR-XXX&return_url=https://partner.example/order/...
+  // L'user (loggé) voit le détail puis confirme le débit de son wallet.
+  {
+    path: '/trade/pay',
+    element: (
+      <ProtectedRoute>
+        <TradePay />
       </ProtectedRoute>
     ),
   },
@@ -135,6 +169,16 @@ export const router = createBrowserRouter([
       { path: '/admin-revenue', element: <AdminRevenue /> },
     ],
   },
+
+  // ─── Mini-programs (billers) ─── HORS ProtectedRoute / AppLayout ───
+  // Accessibles à la fois :
+  //   • aux users web logués (navigate interne depuis /bills ou dashboard)
+  //   • à la WebView mobile (ouvert avec ?source=mobile&token=… ; pas
+  //     d'auth localStorage, donc pas de redirect login)
+  // Chaque mini-program est responsable de son propre flow d'auth via
+  // le token URL si présent (futur : appels API M'Paye avec ce token).
+  { path: '/apps/jirama', element: <JiramaMiniProgram /> },
+  { path: '/apps/hotels', element: <HotelsMiniProgram /> },
 
   { path: '*', element: <NotFound /> },
 ]);
