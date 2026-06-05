@@ -50,6 +50,12 @@ import Settings from './pages/app/Settings';
 import TaxiBrousse from './pages/app/TaxiBrousse';
 import TaxiBrousseReservations from './pages/app/TaxiBrousseReservations';
 import TaxiBrousseVoyage from './pages/app/TaxiBrousseVoyage';
+import TransportScolaire from './pages/app/TransportScolaire';
+import TransportScolaireStudents from './pages/app/TransportScolaireStudents';
+import TransportScolaireSchools from './pages/app/TransportScolaireSchools';
+import TransportScolaireSchool from './pages/app/TransportScolaireSchool';
+import TransportScolaireRoute from './pages/app/TransportScolaireRoute';
+import TransportScolaireMySubs from './pages/app/TransportScolaireMySubs';
 import Telepherique from './pages/app/Telepherique';
 import TelepheriqueLigne from './pages/app/TelepheriqueLigne';
 import TelepheriqueTickets from './pages/app/TelepheriqueTickets';
@@ -63,6 +69,16 @@ import HotelsMiniProgram from './pages/apps/Hotels';
 // OAuth Partners
 import OauthConsent from './pages/oauth/Consent';
 import TradePay from './pages/trade/TradePay';
+
+// Partner Portal (self-service)
+import PartnerLogin from './pages/partner-portal/Login';
+import PartnerLayout from './pages/partner-portal/PartnerLayout';
+import { PartnerProtectedRoute } from './pages/partner-portal/PartnerProtectedRoute';
+import PartnerDashboard from './pages/partner-portal/Dashboard';
+import PartnerTrades from './pages/partner-portal/Trades';
+import PartnerWebhooks from './pages/partner-portal/Webhooks';
+import PartnerSettings from './pages/partner-portal/Settings';
+import PartnerActivities from './pages/partner-portal/Activities';
 
 import NotFound from './pages/NotFound';
 
@@ -113,6 +129,26 @@ export const router = createBrowserRouter([
     ),
   },
 
+  // ─── Partner Portal — self-service pour partenaires OAuth ───
+  // Auth complètement isolée de l'auth user (token sous clé localStorage
+  // distincte). Accessible via /partner-portal/login.
+  { path: '/partner-portal/login', element: <PartnerLogin /> },
+  {
+    path: '/partner-portal',
+    element: (
+      <PartnerProtectedRoute>
+        <PartnerLayout />
+      </PartnerProtectedRoute>
+    ),
+    children: [
+      { index: true, element: <PartnerDashboard /> },
+      { path: 'trades', element: <PartnerTrades /> },
+      { path: 'webhooks', element: <PartnerWebhooks /> },
+      { path: 'activities', element: <PartnerActivities /> },
+      { path: 'settings', element: <PartnerSettings /> },
+    ],
+  },
+
   // App shell — toutes les pages protégées sont enfants de AppLayout
   {
     element: (
@@ -154,6 +190,13 @@ export const router = createBrowserRouter([
       { path: '/taxi-brousse', element: <TaxiBrousse /> },
       { path: '/taxi-brousse/voyage/:id', element: <TaxiBrousseVoyage /> },
       { path: '/taxi-brousse/reservations', element: <TaxiBrousseReservations /> },
+      // Transport scolaire
+      { path: '/transport-scolaire', element: <TransportScolaire /> },
+      { path: '/transport-scolaire/students', element: <TransportScolaireStudents /> },
+      { path: '/transport-scolaire/schools', element: <TransportScolaireSchools /> },
+      { path: '/transport-scolaire/schools/:id', element: <TransportScolaireSchool /> },
+      { path: '/transport-scolaire/routes/:id', element: <TransportScolaireRoute /> },
+      { path: '/transport-scolaire/my-subscriptions', element: <TransportScolaireMySubs /> },
       { path: '/telepherique', element: <Telepherique /> },
       { path: '/telepherique/ligne/:id', element: <TelepheriqueLigne /> },
       { path: '/telepherique/tickets', element: <TelepheriqueTickets /> },

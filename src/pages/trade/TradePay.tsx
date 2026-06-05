@@ -1,13 +1,11 @@
 // src/pages/trade/TradePay.tsx
-// Page de confirmation de paiement Trade (initiée par un partenaire OAuth).
+// Page de confirmation Trade (initiée par un partenaire OAuth).
+// Gère DEUX types de trade :
+//   - PAYMENT       → /trade/:tradeNo/pay (débit immédiat)
+//   - AUTHORIZATION → /trade/:tradeNo/authorize (blocage des fonds, capture
+//                     ultérieure par le partenaire). Cf. Phase 7.
 //
 // URL : /trade/pay?trade_no=TR-XXXXXX&return_url=https://partner.example/...
-//
-// Flow :
-//   1. L'user (déjà loggé) arrive depuis le site partenaire.
-//   2. On affiche le détail (montant, subject, partenaire).
-//   3. Click "Payer" → POST /trade/:tradeNo/pay → débit wallet
-//   4. Click "Annuler" → retour vers return_url avec ?status=cancelled
 
 import { AlertTriangle, ArrowRight, CheckCircle2, Loader2, Lock, ShieldCheck, X } from 'lucide-react';
 import { useCallback, useEffect, useState } from 'react';
@@ -62,18 +60,27 @@ export default function TradePay() {
       });
   }, [tradeNo, user, navigate]);
 
+  const isAuthMode = trade?.trade_type === 'AUTHORIZATION';
+
   const handlePay = useCallback(async () => {
     if (!trade) return;
     setPhase('paying');
     setError(null);
     try {
-      await tradeApi.pay(trade.trade_no);
+      // Phase 7 : pré-autorisation vs paiement immédiat
+      if (trade.trade_type === 'AUTHORIZATION') {
+        await tradeApi.authorize(trade.trade_no);
+      } else {
+        await tradeApi.pay(trade.trade_no);
+      }
       setPhase('success');
-      // Redirection automatique après 2s si return_url fourni
       if (returnUrl) {
         setTimeout(() => {
           const url = new URL(returnUrl);
-          url.searchParams.set('status', 'paid');
+          url.searchParams.set(
+            'status',
+            trade.trade_type === 'AUTHORIZATION' ? 'authorized' : 'paid',
+          );
           url.searchParams.set('trade_no', trade.trade_no);
           window.location.href = url.toString();
         }, 2000);
@@ -82,7 +89,7 @@ export default function TradePay() {
       setError(
         err?.response?.data?.message ??
           err?.message ??
-          'Le paiement a échoué. Réessayez.',
+          'L\'opération a échoué. Réessayez.',
       );
       setPhase('error');
     }
@@ -110,10 +117,19 @@ export default function TradePay() {
           <div className="mx-auto w-16 h-16 rounded-full bg-emerald-100 flex items-center justify-center mb-4">
             <CheckCircle2 className="w-9 h-9 text-emerald-600" />
           </div>
-          <h2 className="text-xl font-bold text-gray-900 mb-2">Paiement confirmé</h2>
+          <h2 className="text-xl font-bold text-gray-900 mb-2">
+            {isAuthMode ? 'Fonds bloqués' : 'Paiement confirmé'}
+          </h2>
           <p className="text-gray-600 mb-1">
-            {fmtAmount(trade.amount)} {trade.currency} à <strong>{trade.partner.name}</strong>
+            {fmtAmount(trade.amount)} {trade.currency}{' '}
+            {isAuthMode ? 'réservés pour ' : 'à '}
+            <strong>{trade.partner.name}</strong>
           </p>
+          {isAuthMode && (
+            <p className="text-xs text-gray-500 italic mb-1">
+              Les fonds seront prélevés à la facturation finale.
+            </p>
+          )}
           <p className="text-xs text-gray-400 mb-6">Référence : {trade.trade_no}</p>
           {returnUrl ? (
             <p className="text-sm text-gray-500 flex items-center justify-center gap-2">
@@ -173,13 +189,17 @@ export default function TradePay() {
               </div>
             )}
             <div className="flex-1 min-w-0">
-              <p className="text-xs text-blue-100">Paiement à</p>
+              <p className="text-xs text-blue-100">
+                {isAuthMode ? 'Pré-autorisation pour' : 'Paiement à'}
+              </p>
               <p className="font-semibold truncate">{trade.partner.name}</p>
             </div>
             <ShieldCheck className="w-5 h-5 text-blue-100" />
           </div>
           <div>
-            <p className="text-xs text-blue-100 mb-1">Montant</p>
+            <p className="text-xs text-blue-100 mb-1">
+              {isAuthMode ? 'Montant à bloquer' : 'Montant'}
+            </p>
             <p className="text-4xl font-bold">
               {fmtAmount(trade.amount)} <span className="text-2xl font-normal">{trade.currency}</span>
             </p>
@@ -203,8 +223,19 @@ export default function TradePay() {
           <div className="flex items-center gap-2 text-xs text-gray-500 bg-gray-50 rounded-lg p-3">
             <Lock className="w-4 h-4 flex-shrink-0" />
             <p>
-              Vous serez débité depuis votre solde M'Paye. {trade.partner.name} ne voit
-              pas votre numéro de téléphone.
+              {isAuthMode ? (
+                <>
+                  Ce montant sera <strong>bloqué</strong> sur votre wallet.{' '}
+                  {trade.partner.name} le débitera lors de la facturation finale
+                  (ex : montant réel après votre séjour). Tout solde non utilisé
+                  vous sera restitué.
+                </>
+              ) : (
+                <>
+                  Vous serez débité depuis votre solde M'Paye. {trade.partner.name}{' '}
+                  ne voit pas votre numéro de téléphone.
+                </>
+              )}
             </p>
           </div>
         </div>
@@ -227,11 +258,11 @@ export default function TradePay() {
             {phase === 'paying' ? (
               <>
                 <Loader2 className="w-4 h-4 animate-spin" />
-                Paiement…
+                {isAuthMode ? 'Blocage…' : 'Paiement…'}
               </>
             ) : (
               <>
-                Payer
+                {isAuthMode ? 'Bloquer les fonds' : 'Payer'}
                 <ArrowRight className="w-4 h-4" />
               </>
             )}
@@ -299,6 +330,14 @@ function labelStatus(s: string) {
       return 'annulé';
     case 'FAILED':
       return 'en échec';
+    case 'AUTHORIZED':
+      return 'pré-autorisé';
+    case 'CAPTURED':
+      return 'capturé';
+    case 'PARTIALLY_CAPTURED':
+      return 'partiellement capturé';
+    case 'RELEASED':
+      return 'libéré';
     default:
       return s.toLowerCase();
   }

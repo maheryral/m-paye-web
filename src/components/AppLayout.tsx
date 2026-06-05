@@ -243,8 +243,8 @@ export default function AppLayout() {
       />
 
       <div className="relative flex min-h-screen">
-        {/* ===== Sidebar desktop ===== */}
-        <aside className="hidden lg:flex flex-col w-64 shrink-0 border-r border-bg-border bg-bg-surface/80 backdrop-blur-xl">
+        {/* ===== Sidebar desktop — sticky, reste collée au scroll ===== */}
+        <aside className="hidden lg:flex flex-col w-64 shrink-0 sticky top-0 h-screen border-r border-bg-border bg-bg-surface/80 backdrop-blur-xl">
           <SidebarContent
             isAdmin={isAdmin}
             isMerchant={isMerchant}
