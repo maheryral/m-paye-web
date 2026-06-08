@@ -2,6 +2,32 @@
 @tailwind components;
 @tailwind utilities;
 
+/* ─────────────────────────────────────────────────────────
+   CSS variables pilotées depuis super-admin → AppTheme.
+   Format : canaux RGB séparés par des espaces (PAS de #, PAS de rgb()).
+   Ce format permet à Tailwind 3 de composer l'opacité via la syntaxe
+   `bg-brand-500/20` en injectant <alpha-value> dans `rgb(var(--c) / <alpha>)`.
+   Le ThemeContext convertit les hex de l'API vers ce format au boot.
+   ───────────────────────────────────────────────────────── */
+:root {
+  --color-primary:      59 130 246;   /* #3b82f6 */
+  --color-primary-dark: 37 99 235;    /* #2563eb */
+  --color-secondary:    167 139 250;  /* #a78bfa */
+  --color-success:      16 185 129;   /* #10b981 */
+  --color-warning:      245 158 11;   /* #f59e0b */
+  --color-danger:       239 68 68;    /* #ef4444 */
+}
+
+/* Mode light override (quand <html> n'a PAS la classe "dark") */
+html:not(.dark) {
+  --color-primary:      37 99 235;    /* #2563eb */
+  --color-primary-dark: 29 78 216;    /* #1d4ed8 */
+  --color-secondary:    139 92 246;   /* #8b5cf6 */
+  --color-success:      16 185 129;
+  --color-warning:      245 158 11;
+  --color-danger:       239 68 68;
+}
+
 @layer base {
   html, body, #root { height: 100%; }
   body {

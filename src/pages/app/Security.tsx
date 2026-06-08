@@ -421,13 +421,16 @@ function SecurityToggle({
         onClick={onToggle}
         role="switch"
         aria-checked={enabled}
-        className={`relative w-11 h-6 rounded-full transition-colors shrink-0 mt-1 ${
+        className={`relative w-11 h-6 rounded-full overflow-hidden transition-colors shrink-0 mt-1 ${
           enabled ? 'bg-gradient-brand' : 'bg-bg-elevated border border-bg-border'
         }`}
       >
+        {/* Pastille : `left-0.5` ancre le rond explicitement, puis on translate uniquement
+            de l'écart utile (0 ↔ 20px). Évite le décalage observé sur certains navigateurs
+            où `position:absolute` sans `left` rendait la pastille hors du bouton. */}
         <span
-          className="absolute top-0.5 w-5 h-5 rounded-full bg-white shadow transition-transform"
-          style={{ transform: enabled ? 'translateX(22px)' : 'translateX(2px)' }}
+          className="absolute top-0.5 left-0.5 w-5 h-5 rounded-full bg-white shadow transition-transform"
+          style={{ transform: enabled ? 'translateX(20px)' : 'translateX(0)' }}
         />
       </button>
     </div>

@@ -13,38 +13,42 @@ export default {
           border: '#262F4A',        // dividers
           subtle: 'rgba(255,255,255,0.04)', // hover faint
         },
-        // === Brand violet/indigo (gradient palette) ===
+        // === Brand — CSS variable, pilotée depuis super-admin → AppTheme ===
+        // Variables stockées en canaux RGB (`r g b`, sans rgb()), ce qui permet
+        // à Tailwind d'utiliser la syntaxe `/<alpha-value>` (ex: `bg-brand-500/20`).
+        // Les shades 50-400 et 700-900 restent fixes (Tailwind 3 ne fait pas
+        // d'auto-shading sur var()).
         brand: {
           50:  '#F0EFFE',
           100: '#E1E1FE',
           200: '#C7C5FC',
           300: '#A29EF8',
           400: '#7C75F2',
-          500: '#5B52E8',
-          600: '#4A40D4',
+          500: 'rgb(var(--color-primary) / <alpha-value>)',
+          600: 'rgb(var(--color-primary-dark) / <alpha-value>)',
           700: '#3E34B0',
           800: '#332B8C',
           900: '#221C5C',
         },
-        // === Accent secondaire (cyan) ===
+        // === Accent secondaire — pilotable aussi ===
         cyan: {
           400: '#22D3EE',
-          500: '#06B6D4',
+          500: 'rgb(var(--color-secondary) / <alpha-value>)',
           600: '#0891B2',
         },
-        // === Status ===
+        // === Status — pilotable ===
         success: {
-          500: '#10B981',
+          500: 'rgb(var(--color-success) / <alpha-value>)',
           400: '#34D399',
           bg:   'rgba(16, 185, 129, 0.12)',
         },
         warning: {
-          500: '#F59E0B',
+          500: 'rgb(var(--color-warning) / <alpha-value>)',
           400: '#FBBF24',
           bg:   'rgba(245, 158, 11, 0.12)',
         },
         danger: {
-          500: '#F43F5E',
+          500: 'rgb(var(--color-danger) / <alpha-value>)',
           400: '#FB7185',
           bg:   'rgba(244, 63, 94, 0.12)',
         },

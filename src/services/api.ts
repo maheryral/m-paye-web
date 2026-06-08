@@ -186,6 +186,38 @@ export const beneficiaryService = {
   toggleFavorite: (id: string) =>
     api.patch(`/beneficiaries/${id}/favorite`).then((r) => r.data),
   remove: (id: string) => api.delete(`/beneficiaries/${id}`).then((r) => r.data),
+  /**
+   * Upload de la photo de profil — multipart/form-data.
+   * Sur web, `file` est un `File` issu d'un `<input type="file">`.
+   */
+  uploadAvatar: (id: string, file: File) => {
+    const form = new FormData();
+    form.append('file', file);
+    return api
+      .post(`/beneficiaries/${id}/avatar`, form, {
+        headers: { 'Content-Type': 'multipart/form-data' },
+      })
+      .then((r) => r.data);
+  },
+  removeAvatar: (id: string) =>
+    api.delete(`/beneficiaries/${id}/avatar`).then((r) => r.data),
+};
+
+/**
+ * Résout une URL d'asset relative (renvoyée par l'API, ex `/uploads/avatars/...`)
+ * en URL absolue téléchargeable. Renvoie la valeur inchangée si elle est déjà
+ * absolue ou nulle.
+ */
+export const resolveAssetUrl = (
+  relativeOrAbsolute: string | null | undefined,
+): string | null | undefined => {
+  if (!relativeOrAbsolute) return relativeOrAbsolute;
+  if (/^https?:\/\//i.test(relativeOrAbsolute)) return relativeOrAbsolute;
+  const base = API_BASE_URL.replace(/\/$/, '');
+  const cleaned = relativeOrAbsolute.startsWith('/')
+    ? relativeOrAbsolute
+    : `/${relativeOrAbsolute}`;
+  return `${base}${cleaned}`;
 };
 
 /**

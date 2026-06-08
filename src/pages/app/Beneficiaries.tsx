@@ -1,20 +1,28 @@
 import {
+  BadgeCheck,
+  Bookmark,
+  Camera,
+  Clock,
+  Image as ImageIcon,
   Mail,
   MoreVertical,
   Pencil,
   Phone,
   Plus,
+  QrCode,
   Search,
   Send,
+  Share2,
   Star,
   Trash2,
   User as UserIcon,
   Users,
   X,
 } from 'lucide-react';
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { beneficiaryService } from '../../services/api';
+import { QRCodeSVG } from 'qrcode.react';
+import { beneficiaryService, resolveAssetUrl } from '../../services/api';
 import {
   Avatar,
   Badge,
@@ -34,6 +42,12 @@ interface Beneficiary {
   isFavorite: boolean;
   lastAmount?: number;
   lastDate?: string;
+  /** Note privée libre (max 500 chars), affichée uniquement à l'utilisateur. */
+  note?: string | null;
+  /** Vrai si ce contact a un compte M'Paye (lookup backend par phone/email). */
+  isMpayUser?: boolean;
+  /** URL relative ou absolue de la photo (servie par /uploads/avatars/...). */
+  avatarUrl?: string | null;
 }
 
 type View = 'all' | 'favorites' | 'recent';
@@ -58,8 +72,14 @@ export default function Beneficiaries() {
   const [panelOpen, setPanelOpen] = useState(false);
   const [editing, setEditing] = useState<Beneficiary | null>(null);
   const [submitting, setSubmitting] = useState(false);
-  const [form, setForm] = useState({ name: '', phone: '', email: '' });
+  const [form, setForm] = useState({ name: '', phone: '', email: '', note: '' });
   const [errors, setErrors] = useState<Record<string, string>>({});
+
+  // Modal QR de partage (#12)
+  const [qrTarget, setQrTarget] = useState<Beneficiary | null>(null);
+
+  // Avatar : upload géré via un <input type="file"> caché, indexé par id de bénéficiaire.
+  const fileInputRefs = useRef<Record<string, HTMLInputElement | null>>({});
 
   useEffect(() => {
     void load();
@@ -88,7 +108,7 @@ export default function Beneficiaries() {
   };
 
   const resetForm = () => {
-    setForm({ name: '', phone: '', email: '' });
+    setForm({ name: '', phone: '', email: '', note: '' });
     setErrors({});
     setEditing(null);
     setPanelOpen(false);
@@ -101,7 +121,12 @@ export default function Beneficiaries() {
 
   const openEdit = (b: Beneficiary) => {
     setEditing(b);
-    setForm({ name: b.name, phone: b.phone, email: b.email || '' });
+    setForm({
+      name: b.name,
+      phone: b.phone,
+      email: b.email || '',
+      note: b.note || '',
+    });
     setErrors({});
     setPanelOpen(true);
   };
@@ -115,6 +140,7 @@ export default function Beneficiaries() {
           name: form.name.trim(),
           phone: form.phone.replace(/\s/g, ''),
           email: form.email?.trim() || undefined,
+          note: form.note?.trim() || undefined,
         });
         setItems((prev) => prev.map((b) => (b.id === updated.id ? updated : b)));
       } else {
@@ -122,6 +148,7 @@ export default function Beneficiaries() {
           name: form.name.trim(),
           phone: form.phone.replace(/\s/g, ''),
           email: form.email?.trim() || undefined,
+          note: form.note?.trim() || undefined,
         });
         setItems((prev) => [created, ...prev]);
       }
@@ -130,6 +157,66 @@ export default function Beneficiaries() {
       alert(e?.response?.data?.message || 'Erreur');
     } finally {
       setSubmitting(false);
+    }
+  };
+
+  /**
+   * Upload de l'avatar pour un bénéficiaire — déclenché par un <input file>
+   * caché. On valide côté front (format + taille) avant l'appel API pour
+   * remonter une erreur immédiate sans round-trip réseau.
+   */
+  const handleAvatarFile = async (b: Beneficiary, file: File) => {
+    const ALLOWED = ['image/jpeg', 'image/png', 'image/webp'];
+    const MAX = 4 * 1024 * 1024;
+    if (!ALLOWED.includes(file.type)) {
+      alert('Format non supporté (JPEG, PNG ou WebP).');
+      return;
+    }
+    if (file.size > MAX) {
+      alert('Image trop lourde (max 4 Mo).');
+      return;
+    }
+    try {
+      const updated = await beneficiaryService.uploadAvatar(b.id, file);
+      setItems((prev) => prev.map((x) => (x.id === updated.id ? updated : x)));
+    } catch (e: any) {
+      alert(e?.response?.data?.message || "Impossible d'envoyer la photo.");
+    }
+  };
+
+  const handleAvatarRemove = async (b: Beneficiary) => {
+    try {
+      const updated = await beneficiaryService.removeAvatar(b.id);
+      setItems((prev) => prev.map((x) => (x.id === updated.id ? updated : x)));
+    } catch (e: any) {
+      alert(e?.response?.data?.message || 'Action impossible.');
+    }
+  };
+
+  /**
+   * Partage natif (Web Share API) si dispo, sinon copie le payload dans
+   * le presse-papier. Le contact partagé est un deeplink M'Paye qui sera
+   * intercepté côté mobile pour pré-remplir le formulaire d'ajout.
+   */
+  const buildContactPayload = (b: Beneficiary) =>
+    `mpaye://contact?phone=${encodeURIComponent(b.phone)}&name=${encodeURIComponent(b.name)}`;
+
+  const handleShareContact = async (b: Beneficiary) => {
+    const message = `${b.name}\n${b.phone}${b.email ? `\n${b.email}` : ''}\n\nAjouter sur M'Paye : ${buildContactPayload(b)}`;
+    if (navigator.share) {
+      try {
+        await navigator.share({ title: `Contact M'Paye — ${b.name}`, text: message });
+        return;
+      } catch {
+        /* user cancelled */
+        return;
+      }
+    }
+    try {
+      await navigator.clipboard.writeText(message);
+      alert('Contact copié dans le presse-papier.');
+    } catch {
+      alert(message);
     }
   };
 
@@ -269,10 +356,18 @@ export default function Beneficiaries() {
             <BeneficiaryCard
               key={b.id}
               b={b}
+              fileInputRef={(el) => {
+                fileInputRefs.current[b.id] = el;
+              }}
               onSend={() => navigate(`/transfers?toPhone=${b.phone}`)}
               onEdit={() => openEdit(b)}
               onDelete={() => remove(b.id)}
               onToggleFav={() => toggleFav(b.id)}
+              onHistory={() => navigate(`/history?q=${encodeURIComponent(b.name)}`)}
+              onShare={() => setQrTarget(b)}
+              onAvatarPick={() => fileInputRefs.current[b.id]?.click()}
+              onAvatarFile={(file) => handleAvatarFile(b, file)}
+              onAvatarRemove={() => handleAvatarRemove(b)}
             />
           ))}
         </div>
@@ -339,6 +434,21 @@ export default function Beneficiaries() {
                 onChange={(e) => setForm((f) => ({ ...f, email: e.target.value }))}
                 error={errors.email}
               />
+
+              <div className="space-y-1.5">
+                <label className="text-xs font-semibold text-ink-muted block">
+                  Note privée (optionnel)
+                </label>
+                <textarea
+                  value={form.note}
+                  onChange={(e) => setForm((f) => ({ ...f, note: e.target.value }))}
+                  maxLength={500}
+                  rows={2}
+                  placeholder='Ex : "Loyer Tonton", "Frère Antsirabe"'
+                  className="w-full px-3 py-2 text-sm rounded-xl bg-bg-elevated border border-bg-border focus:border-brand-500 focus:outline-none resize-none text-ink placeholder:text-ink-muted"
+                />
+                <p className="text-[11px] text-ink-muted">Visible uniquement par vous.</p>
+              </div>
             </div>
 
             <div className="p-4 border-t border-bg-border flex gap-2 shrink-0">
@@ -358,30 +468,123 @@ export default function Beneficiaries() {
           </aside>
         </>
       )}
+
+      {/* === Modal QR de partage (#12) === */}
+      {qrTarget && (
+        <>
+          <div
+            className="fixed inset-0 z-40 bg-black/70 backdrop-blur-sm animate-fade-in"
+            onClick={() => setQrTarget(null)}
+          />
+          <div className="fixed inset-0 z-50 flex items-center justify-center p-4 pointer-events-none">
+            <div
+              className="card shadow-elevated w-full max-w-sm p-6 pointer-events-auto animate-slide-in"
+              onClick={(e) => e.stopPropagation()}
+            >
+              <div className="flex items-center justify-between mb-4">
+                <h3 className="text-base font-bold">Partager le contact</h3>
+                <button
+                  onClick={() => setQrTarget(null)}
+                  className="p-1.5 rounded-lg hover:bg-bg-subtle text-ink-muted hover:text-ink"
+                  aria-label="Fermer"
+                >
+                  <X size={16} />
+                </button>
+              </div>
+
+              <div className="flex flex-col items-center text-center">
+                <Avatar
+                  name={qrTarget.name}
+                  src={resolveAssetUrl(qrTarget.avatarUrl) || undefined}
+                  size="lg"
+                />
+                <div className="mt-2 text-sm font-bold">{qrTarget.name}</div>
+                <div className="text-xs text-ink-muted">{formatPhone(qrTarget.phone)}</div>
+
+                <div className="mt-4 p-3 rounded-xl bg-white">
+                  <QRCodeSVG value={buildContactPayload(qrTarget)} size={196} level="M" />
+                </div>
+
+                <p className="mt-3 text-xs text-ink-muted px-2">
+                  Scannez ce code dans M'Paye pour ajouter le contact instantanément.
+                </p>
+
+                <Button
+                  variant="primary"
+                  size="md"
+                  icon={Share2}
+                  className="mt-4"
+                  onClick={() => handleShareContact(qrTarget)}
+                >
+                  Partager
+                </Button>
+              </div>
+            </div>
+          </div>
+        </>
+      )}
     </div>
   );
 }
 
-function BeneficiaryCard({
-  b,
-  onSend,
-  onEdit,
-  onDelete,
-  onToggleFav,
-}: {
+interface BeneficiaryCardProps {
   b: Beneficiary;
+  fileInputRef: (el: HTMLInputElement | null) => void;
   onSend: () => void;
   onEdit: () => void;
   onDelete: () => void;
   onToggleFav: () => void;
-}) {
+  onHistory: () => void;
+  onShare: () => void;
+  onAvatarPick: () => void;
+  onAvatarFile: (file: File) => void;
+  onAvatarRemove: () => void;
+}
+
+function BeneficiaryCard({
+  b,
+  fileInputRef,
+  onSend,
+  onEdit,
+  onDelete,
+  onToggleFav,
+  onHistory,
+  onShare,
+  onAvatarPick,
+  onAvatarFile,
+  onAvatarRemove,
+}: BeneficiaryCardProps) {
   const [menuOpen, setMenuOpen] = useState(false);
+  const avatarSrc = resolveAssetUrl(b.avatarUrl) || undefined;
 
   return (
     <Card padding="md" className="group relative">
-      {/* Top: avatar + actions */}
+      {/* Input file caché — déclenché par "Changer la photo" du menu. */}
+      <input
+        ref={fileInputRef}
+        type="file"
+        accept="image/jpeg,image/png,image/webp"
+        className="hidden"
+        onChange={(e) => {
+          const file = e.target.files?.[0];
+          if (file) onAvatarFile(file);
+          // Reset pour pouvoir re-sélectionner le même fichier
+          e.target.value = '';
+        }}
+      />
+
+      {/* Top: avatar (cliquable pour upload) + actions */}
       <div className="flex items-start justify-between mb-3">
-        <Avatar name={b.name} size="lg" />
+        <button
+          onClick={onAvatarPick}
+          className="relative group/avatar"
+          aria-label="Changer la photo"
+        >
+          <Avatar name={b.name} src={avatarSrc} size="lg" />
+          <span className="absolute inset-0 rounded-full bg-black/55 opacity-0 group-hover/avatar:opacity-100 transition-opacity flex items-center justify-center">
+            <Camera size={16} className="text-white" />
+          </span>
+        </button>
         <div className="flex items-center gap-1">
           <button
             onClick={onToggleFav}
@@ -392,42 +595,80 @@ function BeneficiaryCard({
             }`}
             aria-label="Favori"
           >
-            <Star
-              size={16}
-              fill={b.isFavorite ? 'currentColor' : 'none'}
-            />
+            <Star size={16} fill={b.isFavorite ? 'currentColor' : 'none'} />
           </button>
           <div className="relative">
             <button
               onClick={() => setMenuOpen((v) => !v)}
               className="p-1.5 rounded-lg text-ink-muted hover:text-ink hover:bg-bg-subtle"
+              aria-label="Plus d'actions"
             >
               <MoreVertical size={16} />
             </button>
             {menuOpen && (
               <>
                 <div className="fixed inset-0 z-10" onClick={() => setMenuOpen(false)} />
-                <div className="absolute right-0 top-full mt-1 w-40 card shadow-elevated z-20 p-1 animate-slide-in">
-                  <button
+                <div className="absolute right-0 top-full mt-1 w-52 card shadow-elevated z-20 p-1 animate-slide-in">
+                  <MenuItem
+                    icon={Send}
+                    label="Envoyer de l'argent"
+                    onClick={() => {
+                      setMenuOpen(false);
+                      onSend();
+                    }}
+                  />
+                  <MenuItem
+                    icon={Clock}
+                    label="Voir l'historique"
+                    onClick={() => {
+                      setMenuOpen(false);
+                      onHistory();
+                    }}
+                  />
+                  <MenuItem
+                    icon={QrCode}
+                    label="Partager le contact"
+                    onClick={() => {
+                      setMenuOpen(false);
+                      onShare();
+                    }}
+                  />
+                  <MenuItem
+                    icon={ImageIcon}
+                    label={b.avatarUrl ? 'Changer la photo' : 'Ajouter une photo'}
+                    onClick={() => {
+                      setMenuOpen(false);
+                      onAvatarPick();
+                    }}
+                  />
+                  {b.avatarUrl && (
+                    <MenuItem
+                      icon={X}
+                      label="Retirer la photo"
+                      onClick={() => {
+                        setMenuOpen(false);
+                        onAvatarRemove();
+                      }}
+                    />
+                  )}
+                  <div className="my-1 h-px bg-bg-border" />
+                  <MenuItem
+                    icon={Pencil}
+                    label="Modifier"
                     onClick={() => {
                       setMenuOpen(false);
                       onEdit();
                     }}
-                    className="w-full flex items-center gap-2 px-2.5 py-2 rounded-lg text-sm text-ink-muted hover:text-ink hover:bg-bg-subtle text-left"
-                  >
-                    <Pencil size={14} />
-                    Modifier
-                  </button>
-                  <button
+                  />
+                  <MenuItem
+                    icon={Trash2}
+                    label="Supprimer"
+                    tone="danger"
                     onClick={() => {
                       setMenuOpen(false);
                       onDelete();
                     }}
-                    className="w-full flex items-center gap-2 px-2.5 py-2 rounded-lg text-sm text-danger-400 hover:bg-danger-bg text-left"
-                  >
-                    <Trash2 size={14} />
-                    Supprimer
-                  </button>
+                  />
                 </div>
               </>
             )}
@@ -437,7 +678,18 @@ function BeneficiaryCard({
 
       {/* Info */}
       <div className="min-w-0 mb-3">
-        <div className="text-sm font-bold truncate">{b.name}</div>
+        <div className="flex items-center gap-1.5 min-w-0">
+          <span className="text-sm font-bold truncate">{b.name}</span>
+          {b.isMpayUser && (
+            <span
+              className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded-full text-[10px] font-bold bg-brand-500/10 text-brand-500 border border-brand-500/30 shrink-0"
+              title="Ce contact a un compte M'Paye"
+            >
+              <BadgeCheck size={10} />
+              Sur M'Paye
+            </span>
+          )}
+        </div>
         <div className="text-xs text-ink-muted truncate flex items-center gap-1.5 mt-1">
           <Phone size={11} />
           {formatPhone(b.phone)}
@@ -446,6 +698,12 @@ function BeneficiaryCard({
           <div className="text-xs text-ink-muted truncate flex items-center gap-1.5 mt-0.5">
             <Mail size={11} />
             {b.email}
+          </div>
+        )}
+        {b.note && (
+          <div className="text-xs text-ink-muted italic truncate flex items-center gap-1.5 mt-1">
+            <Bookmark size={10} />
+            {b.note}
           </div>
         )}
         {b.lastAmount && (
@@ -460,5 +718,32 @@ function BeneficiaryCard({
         Envoyer
       </Button>
     </Card>
+  );
+}
+
+/** Item du menu contextuel — extrait pour rester DRY (5+ items partagent ce shape). */
+function MenuItem({
+  icon: Icon,
+  label,
+  onClick,
+  tone = 'default',
+}: {
+  icon: typeof Send;
+  label: string;
+  onClick: () => void;
+  tone?: 'default' | 'danger';
+}) {
+  const cls =
+    tone === 'danger'
+      ? 'text-danger-400 hover:bg-danger-bg'
+      : 'text-ink-muted hover:text-ink hover:bg-bg-subtle';
+  return (
+    <button
+      onClick={onClick}
+      className={`w-full flex items-center gap-2 px-2.5 py-2 rounded-lg text-sm text-left ${cls}`}
+    >
+      <Icon size={14} />
+      {label}
+    </button>
   );
 }
