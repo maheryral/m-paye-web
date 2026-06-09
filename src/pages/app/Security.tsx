@@ -8,6 +8,7 @@ import {
   KeyRound,
   Lock,
   LogOut,
+  MessageSquare,
   Monitor,
   Shield,
   ShieldCheck,
@@ -16,7 +17,7 @@ import {
 } from 'lucide-react';
 import { useEffect, useState } from 'react';
 import { useAuth } from '../../contexts/AuthContext';
-import { authService } from '../../services/api';
+import { accountService, authService, sendPasswordSetupOtp } from '../../services/api';
 import { Badge, Button, Card, Input, PageHeader } from '../../ui';
 
 interface Session {
@@ -46,7 +47,10 @@ function timeAgo(iso: string): string {
 }
 
 export default function Security() {
-  const { logoutAllDevices } = useAuth();
+  const { user, logoutAllDevices, updateUser } = useAuth();
+
+  // Inscription OTP → `user.hasPassword=false` → mode "Création" (sans currentPassword).
+  const hasPassword = !!user?.hasPassword;
 
   const [currentPwd, setCurrentPwd] = useState('');
   const [newPwd, setNewPwd] = useState('');
@@ -54,6 +58,15 @@ export default function Security() {
   const [showPwd, setShowPwd] = useState(false);
   const [loading, setLoading] = useState(false);
   const [msg, setMsg] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
+
+  // Step-up OTP — utilisé pour 2 cas :
+  //  - Création initiale du mdp (compte OTP, hasPassword=false)
+  //  - Réinitialisation (user qui a oublié son mdp) — `resetMode=true`
+  // Empêche un JWT volé de verrouiller le compte avec un mdp inconnu.
+  const [otpModalOpen, setOtpModalOpen] = useState(false);
+  const [otpInput, setOtpInput] = useState('');
+  const [otpSending, setOtpSending] = useState(false);
+  const [resetMode, setResetMode] = useState(false);
 
   const [twoFactor, setTwoFactor] = useState(false);
   const [biometric, setBiometric] = useState(false);
@@ -69,22 +82,60 @@ export default function Security() {
     }
   };
 
+  // === Score de sécurité dynamique (calculé serveur) ===
+  type SecurityComponent = {
+    id: string;
+    label: string;
+    weight: number;
+    achieved: boolean;
+    hint?: string;
+  };
+  type SecurityScoreData = {
+    score: number;
+    level: 'weak' | 'fair' | 'good' | 'excellent';
+    components: SecurityComponent[];
+  };
+  const [scoreData, setScoreData] = useState<SecurityScoreData | null>(null);
+  const [scoreLoading, setScoreLoading] = useState(true);
+
+  const loadSecurityScore = async () => {
+    try {
+      setScoreLoading(true);
+      const data = await accountService.getSecurityScore();
+      setScoreData(data);
+    } catch {
+      // Silent : on n'affiche pas un faux score
+    } finally {
+      setScoreLoading(false);
+    }
+  };
+
   useEffect(() => {
     loadSessions();
+    void loadSecurityScore();
   }, []);
 
-  // Security score: max 100
-  const passwordStrength = newPwd.length === 0 ? 0 : Math.min(100, newPwd.length * 8);
-  const score =
-    50 +
-    (twoFactor ? 25 : 0) +
-    (biometric ? 15 : 0) +
-    (sessions.length === 1 ? 10 : 0);
+  // Force de mot de passe pendant la saisie — purement visuel/local.
+  const passwordStrength =
+    newPwd.length === 0 ? 0 : Math.min(100, newPwd.length * 8);
 
+  // Score / couleurs / label dérivés des données serveur.
+  const score = scoreData?.score ?? 0;
+  const level = scoreData?.level ?? 'weak';
   const scoreColor =
-    score >= 80 ? '#10B981' : score >= 60 ? '#F59E0B' : '#F43F5E';
+    level === 'excellent' || level === 'good'
+      ? '#10B981'
+      : level === 'fair'
+      ? '#F59E0B'
+      : '#F43F5E';
   const scoreLabel =
-    score >= 80 ? 'Excellent' : score >= 60 ? 'Bon' : 'À renforcer';
+    level === 'excellent'
+      ? 'Excellent'
+      : level === 'good'
+      ? 'Bon'
+      : level === 'fair'
+      ? 'À renforcer'
+      : 'Vulnérable';
 
   const flash = (type: 'success' | 'error', text: string) => {
     setMsg({ type, text });
@@ -93,9 +144,31 @@ export default function Security() {
 
   const changePwd = async (e?: React.FormEvent) => {
     e?.preventDefault();
-    if (!currentPwd || !newPwd || !confirmPwd) return flash('error', 'Remplissez tous les champs');
+    // En mode reset, on ne demande pas le currentPassword (l'user l'a oublié).
+    if (hasPassword && !resetMode && !currentPwd)
+      return flash('error', 'Mot de passe actuel requis');
+    if (!newPwd || !confirmPwd) return flash('error', 'Remplissez tous les champs');
     if (newPwd.length < 8) return flash('error', 'Au moins 8 caractères requis');
+    if (!/^(?=.*[A-Za-z])(?=.*\d).+$/.test(newPwd))
+      return flash('error', 'Le mot de passe doit contenir au moins une lettre et un chiffre');
     if (newPwd !== confirmPwd) return flash('error', 'Les mots de passe ne correspondent pas');
+
+    // === Chemin OTP (Création OU Réinitialisation) ===
+    if (!hasPassword || resetMode) {
+      setOtpSending(true);
+      try {
+        await sendPasswordSetupOtp();
+        setOtpInput('');
+        setOtpModalOpen(true);
+      } catch (err: any) {
+        flash('error', err?.response?.data?.message || "Impossible d'envoyer le code SMS");
+      } finally {
+        setOtpSending(false);
+      }
+      return;
+    }
+
+    // === Chemin MODIFICATION : currentPassword fait office de step-up ===
     setLoading(true);
     try {
       await authService.changePassword({ currentPassword: currentPwd, newPassword: newPwd });
@@ -103,10 +176,59 @@ export default function Security() {
       setNewPwd('');
       setConfirmPwd('');
       flash('success', 'Mot de passe mis à jour avec succès');
-    } catch (e: any) {
-      flash('error', e?.response?.data?.message || 'Erreur');
+    } catch (err: any) {
+      flash('error', err?.response?.data?.message || 'Erreur');
     } finally {
       setLoading(false);
+    }
+  };
+
+  /**
+   * Soumet la création de mdp après que l'user a saisi l'OTP step-up.
+   * Garde le modal ouvert si l'OTP est invalide pour qu'il puisse redemander.
+   */
+  const submitCreationWithOtp = async () => {
+    if (!/^\d{6}$/.test(otpInput)) return flash('error', 'Code à 6 chiffres requis');
+    setLoading(true);
+    try {
+      await authService.changePassword({ otpCode: otpInput, newPassword: newPwd });
+      if (!hasPassword) await updateUser({ hasPassword: true });
+      setCurrentPwd('');
+      setNewPwd('');
+      setConfirmPwd('');
+      setOtpInput('');
+      setOtpModalOpen(false);
+      setResetMode(false);
+      flash(
+        'success',
+        resetMode ? 'Mot de passe réinitialisé avec succès' : 'Mot de passe créé avec succès',
+      );
+    } catch (err: any) {
+      flash('error', err?.response?.data?.message || 'Code invalide ou expiré');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  /** Bascule en mode "Réinitialisation" : cache currentPassword, vide le champ. */
+  const triggerResetMode = () => {
+    setResetMode(true);
+    setCurrentPwd('');
+    flash(
+      'success',
+      "Mode réinitialisation : un SMS sera envoyé pour confirmer.",
+    );
+  };
+
+  const resendSetupOtp = async () => {
+    setOtpSending(true);
+    try {
+      await sendPasswordSetupOtp();
+      flash('success', 'Nouveau code envoyé par SMS');
+    } catch (err: any) {
+      flash('error', err?.response?.data?.message || 'Impossible de renvoyer le code');
+    } finally {
+      setOtpSending(false);
     }
   };
 
@@ -165,26 +287,61 @@ export default function Security() {
                 }}
               >
                 <div className="absolute inset-2 rounded-full bg-bg-surface flex flex-col items-center justify-center">
-                  <div className="text-3xl font-bold" style={{ color: scoreColor }}>
-                    {score}
-                  </div>
-                  <div className="text-[10px] text-ink-muted uppercase tracking-wider">
-                    /100
-                  </div>
+                  {scoreLoading ? (
+                    <div className="text-xs text-ink-muted">...</div>
+                  ) : (
+                    <>
+                      <div className="text-3xl font-bold" style={{ color: scoreColor }}>
+                        {score}
+                      </div>
+                      <div className="text-[10px] text-ink-muted uppercase tracking-wider">
+                        /100
+                      </div>
+                    </>
+                  )}
                 </div>
               </div>
               <div className="mt-4 text-sm font-bold">Score de sécurité</div>
-              <Badge tone={score >= 80 ? 'success' : score >= 60 ? 'warning' : 'danger'} className="mt-2">
+              <Badge
+                tone={level === 'excellent' || level === 'good' ? 'success' : level === 'fair' ? 'warning' : 'danger'}
+                className="mt-2"
+              >
                 {scoreLabel}
               </Badge>
             </div>
 
-            <div className="mt-5 pt-5 border-t border-bg-border space-y-2.5">
-              <Checkmark done label="Mot de passe défini" />
-              <Checkmark done={twoFactor} label="Auth 2FA activée" />
-              <Checkmark done={biometric} label="Biométrie WebAuthn" />
-              <Checkmark done={sessions.length === 1} label="Une seule session" />
-            </div>
+            {/* Liste dynamique des composants — vient du serveur, hint affiché
+                quand non-acquis pour guider l'user sur quoi améliorer. */}
+            {scoreData && (
+              <div className="mt-5 pt-5 border-t border-bg-border space-y-2.5">
+                {scoreData.components.map((c) => (
+                  <div key={c.id} className="flex items-start gap-2 text-sm">
+                    <div
+                      className={`mt-0.5 w-4 h-4 rounded-full flex items-center justify-center shrink-0 ${
+                        c.achieved ? 'bg-success-500 text-white' : 'bg-bg-elevated text-ink-dim'
+                      }`}
+                    >
+                      <Check size={10} strokeWidth={3} />
+                    </div>
+                    <div className="flex-1 min-w-0">
+                      <div className="flex items-center justify-between gap-2">
+                        <span className={c.achieved ? 'text-ink' : 'text-ink-muted'}>
+                          {c.label}
+                        </span>
+                        <span className="text-[10px] font-bold text-ink-dim shrink-0">
+                          +{c.weight}
+                        </span>
+                      </div>
+                      {!c.achieved && c.hint && (
+                        <div className="text-[11px] text-ink-muted mt-0.5 leading-snug">
+                          {c.hint}
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
           </Card>
         </div>
 
@@ -194,23 +351,37 @@ export default function Security() {
           <Card padding="md">
             <div className="flex items-center gap-2 mb-1">
               <KeyRound size={18} className="text-brand-300" />
-              <h3 className="text-base font-bold">Mot de passe</h3>
+              <h3 className="text-base font-bold">
+                {!hasPassword
+                  ? 'Créer un mot de passe'
+                  : resetMode
+                  ? 'Réinitialiser le mot de passe'
+                  : 'Modifier le mot de passe'}
+              </h3>
             </div>
             <p className="text-xs text-ink-muted mb-5">
-              Utilisez au moins 8 caractères, avec des lettres, chiffres et symboles
+              {!hasPassword
+                ? "Votre compte n'a pas encore de mot de passe. En créer un permet de vous connecter sans attendre le code SMS."
+                : resetMode
+                ? `Un code SMS sera envoyé à ${user?.telephone || 'votre numéro'} pour confirmer la réinitialisation.`
+                : 'Utilisez au moins 8 caractères, avec des lettres, chiffres et symboles.'}
             </p>
 
             <form onSubmit={changePwd} className="space-y-4">
-              <Input
-                label="Mot de passe actuel"
-                type={showPwd ? 'text' : 'password'}
-                icon={Lock}
-                iconEnd={showPwd ? EyeOff : Eye}
-                onIconEndClick={() => setShowPwd((v) => !v)}
-                value={currentPwd}
-                onChange={(e) => setCurrentPwd(e.target.value)}
-                autoComplete="current-password"
-              />
+              {hasPassword && !resetMode && (
+                <div>
+                  <Input
+                    label="Mot de passe actuel"
+                    type={showPwd ? 'text' : 'password'}
+                    icon={Lock}
+                    iconEnd={showPwd ? EyeOff : Eye}
+                    onIconEndClick={() => setShowPwd((v) => !v)}
+                    value={currentPwd}
+                    onChange={(e) => setCurrentPwd(e.target.value)}
+                    autoComplete="current-password"
+                  />
+                </div>
+              )}
               <Input
                 label="Nouveau mot de passe"
                 type={showPwd ? 'text' : 'password'}
@@ -265,12 +436,56 @@ export default function Security() {
                 type="submit"
                 variant="primary"
                 size="md"
-                loading={loading}
+                loading={loading || otpSending}
                 icon={Check}
-                disabled={!currentPwd || !newPwd || !confirmPwd}
+                disabled={(hasPassword && !resetMode && !currentPwd) || !newPwd || !confirmPwd}
               >
-                Mettre à jour
+                {!hasPassword
+                  ? 'Créer le mot de passe'
+                  : resetMode
+                  ? 'Envoyer le code SMS'
+                  : 'Mettre à jour'}
               </Button>
+
+              {/* Bouton secondaire "Réinitialiser via SMS" — uniquement en mode
+                  Modification, pour les users qui ont oublié leur mdp. Plus
+                  discoverable qu'un simple lien sous le champ currentPassword. */}
+              {hasPassword && !resetMode && (
+                <>
+                  <div className="flex items-center gap-3 pt-2">
+                    <div className="flex-1 h-px bg-bg-border" />
+                    <span className="text-[10px] font-bold uppercase tracking-wider text-ink-dim">
+                      ou
+                    </span>
+                    <div className="flex-1 h-px bg-bg-border" />
+                  </div>
+
+                  <button
+                    type="button"
+                    onClick={triggerResetMode}
+                    disabled={loading || otpSending}
+                    className="w-full flex items-center justify-center gap-2 px-4 py-2.5 rounded-xl border-2 border-brand-500 text-brand-300 font-bold text-sm hover:bg-brand-500/10 transition-colors disabled:opacity-50"
+                  >
+                    <MessageSquare size={16} />
+                    Réinitialiser via code SMS
+                  </button>
+
+                  <p className="text-[11px] text-ink-muted text-center leading-relaxed">
+                    Vous avez oublié votre mot de passe ? Recevez un code par SMS
+                    pour le réinitialiser.
+                  </p>
+                </>
+              )}
+
+              {hasPassword && resetMode && (
+                <button
+                  type="button"
+                  onClick={() => setResetMode(false)}
+                  className="block mx-auto text-xs font-semibold text-ink-muted hover:text-ink"
+                >
+                  ← Annuler, je veux modifier avec mon mot de passe actuel
+                </button>
+              )}
             </form>
           </Card>
 
@@ -369,6 +584,65 @@ export default function Security() {
           </Card>
         </div>
       </div>
+
+      {/* === Modal step-up OTP : création initiale de mdp seulement === */}
+      {otpModalOpen && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/55 backdrop-blur-sm px-4">
+          <div className="w-full max-w-sm rounded-2xl border border-bg-border bg-bg-surface p-6 shadow-2xl">
+            <div className="flex items-center gap-2 mb-3">
+              <ShieldCheck size={20} className="text-brand-300" />
+              <h3 className="text-base font-bold flex-1">Confirmer la création</h3>
+              <button
+                type="button"
+                onClick={() => setOtpModalOpen(false)}
+                className="p-1 -mr-1 text-ink-muted hover:text-ink"
+                aria-label="Fermer"
+              >
+                ×
+              </button>
+            </div>
+
+            <p className="text-xs text-ink-muted leading-relaxed mb-4">
+              Un code à 6 chiffres a été envoyé par SMS à{' '}
+              <span className="text-ink font-semibold">{user?.telephone || 'votre numéro'}</span>.
+              Cette étape protège votre compte contre les accès non autorisés.
+            </p>
+
+            <input
+              type="text"
+              inputMode="numeric"
+              autoComplete="one-time-code"
+              maxLength={6}
+              value={otpInput}
+              onChange={(e) => setOtpInput(e.target.value.replace(/\D/g, ''))}
+              placeholder="123456"
+              autoFocus
+              className="input w-full text-center text-2xl tracking-[0.4em] font-bold py-3 mb-4"
+            />
+
+            <Button
+              variant="primary"
+              size="md"
+              fullWidth
+              loading={loading}
+              disabled={otpInput.length !== 6}
+              onClick={submitCreationWithOtp}
+              icon={Check}
+            >
+              Créer le mot de passe
+            </Button>
+
+            <button
+              type="button"
+              onClick={resendSetupOtp}
+              disabled={otpSending}
+              className="block mx-auto mt-3 text-xs font-semibold text-brand-300 hover:text-brand-200 disabled:opacity-50"
+            >
+              {otpSending ? 'Envoi…' : 'Renvoyer le code'}
+            </button>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

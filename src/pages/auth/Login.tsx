@@ -130,7 +130,18 @@ export default function Login() {
       const identifier = mode === 'phone' ? fullPhone() : email;
       await login(identifier, password);
       navigate('/dashboard', { replace: true });
-    } catch {
+    } catch (error: any) {
+      // Cas spécifique : compte créé via OTP, jamais de mot de passe défini.
+      // Backend renvoie `{ nopassword: true }` — on bascule auto vers OTP plutôt
+      // que d'afficher "Mot de passe incorrect" qui serait trompeur.
+      const data = error?.response?.data;
+      if (data?.nopassword) {
+        fail('Aucun mot de passe défini sur ce compte. Envoi du code SMS…');
+        setTimeout(() => {
+          void sendOTP();
+        }, 800);
+        return;
+      }
       fail('Mot de passe incorrect');
     } finally {
       setLoading(false);
@@ -353,12 +364,16 @@ export default function Login() {
             Se connecter
           </Button>
           <div className="flex items-center justify-between text-xs">
-            <Link
-              to="/auth/forgot-password"
-              className="text-brand-300 font-semibold hover:text-brand-200"
+            {/* Mot de passe oublié → bascule sur le flow OTP. L'user se connecte
+                par SMS, puis pourra réinitialiser depuis Paramètres > Sécurité. */}
+            <button
+              type="button"
+              onClick={() => void sendOTP()}
+              disabled={loading}
+              className="text-brand-300 font-semibold hover:text-brand-200 disabled:opacity-50"
             >
               Mot de passe oublié ?
-            </Link>
+            </button>
             <button
               type="button"
               onClick={() => setStep('method')}

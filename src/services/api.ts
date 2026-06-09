@@ -148,6 +148,31 @@ export const accountService = {
   getProfile: () => api.get('/user/profile').then((r) => r.data),
   updateProfile: (data: any) =>
     api.patch('/user/profile', data).then((r) => r.data),
+  /**
+   * Score de sécurité du compte (calculé serveur).
+   * Retourne `{ score: 0-100, level: 'weak'|'fair'|'good'|'excellent', components: [...] }`.
+   */
+  getSecurityScore: () =>
+    api.get('/user/security-score').then((r) => r.data),
+  /**
+   * Export RGPD complet (profil, transactions, bénéficiaires, etc.) au format JSON.
+   * Le client est responsable de sauvegarder/télécharger le résultat.
+   */
+  exportData: () => api.get('/user/export-data').then((r) => r.data),
+  /**
+   * Upload de la photo de profil — multipart/form-data.
+   * `file` est un `File` issu d'un `<input type="file">`.
+   */
+  uploadAvatar: (file: File) => {
+    const form = new FormData();
+    form.append('file', file);
+    return api
+      .post('/user/avatar', form, {
+        headers: { 'Content-Type': 'multipart/form-data' },
+      })
+      .then((r) => r.data);
+  },
+  removeAvatar: () => api.delete('/user/avatar').then((r) => r.data),
 };
 
 export const transactionService = {
@@ -177,6 +202,14 @@ export const notificationService = {
   markAllAsRead: () => api.patch('/notifications/read-all').then((r) => r.data),
   archive: (id: string) => api.patch(`/notifications/${id}/archive`).then((r) => r.data),
 };
+
+/**
+ * Step-up auth : envoie un OTP au téléphone du user pour autoriser la
+ * création initiale de son mot de passe. Refuse si l'user a déjà un mdp.
+ * Cf. backend POST /auth/send-password-setup-otp.
+ */
+export const sendPasswordSetupOtp = () =>
+  api.post('/auth/send-password-setup-otp').then((r) => r.data);
 
 export const beneficiaryService = {
   list: () => api.get('/beneficiaries').then((r) => r.data),
@@ -250,6 +283,99 @@ export interface QrGenerateResult {
   payoutOperator: string | null;
   expiration: string;
 }
+
+/**
+ * Location de voiture — phase 1 : lecture seule (search + détail).
+ * Le booking/paiement vient en phase 2.
+ */
+export interface RentalListing {
+  id: string;
+  city: string;
+  pricePerDay: number | string;
+  withDriver: boolean;
+  deposit: number | string;
+  minDays: number;
+  notes?: string | null;
+  vehicle: {
+    id: string;
+    brand: string;
+    model: string;
+    year?: number | null;
+    type: string;
+    seats: number;
+    hasAC: boolean;
+    transmission: string;
+    fuel: string;
+    photos?: string[] | null;
+    description?: string | null;
+  };
+  partner: {
+    id: string;
+    name: string;
+    logoUrl?: string | null;
+    phone: string;
+    email?: string | null;
+    city: string;
+    /** Coords GPS optionnelles (Decimal stringifié par Prisma). */
+    latitude?: number | string | null;
+    longitude?: number | string | null;
+    description?: string | null;
+  };
+}
+
+export interface RentalBooking {
+  id: string;
+  startDate: string;
+  endDate: string;
+  days: number;
+  pricePerDay: string | number;
+  deposit: string | number;
+  totalAmount: string | number;
+  withDriver: boolean;
+  pickupCity: string;
+  paymentStatus: 'pending' | 'paid' | 'cancelled' | 'refunded';
+  bookingStatus: 'pending' | 'confirmed' | 'cancelled' | 'completed';
+  paymentReference?: string | null;
+  refundAmount?: string | number | null;
+  confirmationCode: string;
+  createdAt: string;
+  paidAt?: string | null;
+  cancelledAt?: string | null;
+  listing?: {
+    id: string;
+    vehicle: { brand: string; model: string; type: string; photos?: string[] | null };
+    partner: { id: string; name: string; phone: string };
+  };
+}
+
+export const vehicleRentalService = {
+  // Public
+  search: (params?: {
+    city?: string;
+    type?: string;
+    withDriver?: boolean;
+    minSeats?: number;
+    maxPricePerDay?: number;
+  }) =>
+    api
+      .get<{ items: RentalListing[]; total: number }>('/vehicle-rentals', { params })
+      .then((r) => r.data),
+  detail: (id: string) =>
+    api.get<RentalListing>(`/vehicle-rentals/${id}`).then((r) => r.data),
+  cities: () => api.get<string[]>('/vehicle-rentals/cities').then((r) => r.data),
+
+  // Booking (auth requise — l'interceptor ajoute le token automatiquement)
+  book: (listingId: string, payload: { startDate: string; endDate: string }) =>
+    api.post<RentalBooking>(`/vehicle-rentals/${listingId}/book`, payload).then((r) => r.data),
+  pay: (bookingId: string) =>
+    api.post<RentalBooking>(`/vehicle-rentals/bookings/${bookingId}/pay`).then((r) => r.data),
+  myBookings: () =>
+    api.get<RentalBooking[]>('/vehicle-rentals/bookings/me').then((r) => r.data),
+  cancelBooking: (bookingId: string, note?: string) =>
+    api
+      .patch<RentalBooking>(`/vehicle-rentals/bookings/${bookingId}/cancel`, { note })
+      .then((r) => r.data),
+};
 
 export const qrService = {
   generate: (data: {

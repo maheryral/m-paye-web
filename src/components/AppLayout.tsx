@@ -17,6 +17,7 @@ import {
   MessageSquare,
   BarChart3,
   HelpCircle,
+  Car,
   Package,
   Plane,
   QrCode,
@@ -42,6 +43,7 @@ import { secureStorage } from '../services/storage';
 import { Link, NavLink, Outlet, useLocation, useNavigate } from 'react-router-dom';
 import { Avatar, Button } from '../ui';
 import { useAuth } from '../contexts/AuthContext';
+import { resolveAssetUrl } from '../services/api';
 import { useSocket } from '../contexts/SocketContext';
 
 interface NavGroup {
@@ -127,6 +129,7 @@ const GROUPS: NavGroup[] = [
       { to: '/train', label: 'Train', icon: AppWindow },
       { to: '/hotels', label: 'Hôtels', icon: Building2 },
       { to: '/flight-booking', label: 'Vols', icon: Plane },
+      { to: '/vehicle-rentals', label: 'Location voiture', icon: Car },
     ],
   },
   {
@@ -507,7 +510,11 @@ function Topbar({
             onClick={() => setUserMenuOpen(!userMenuOpen)}
             className="flex items-center gap-2 rounded-xl pl-1 pr-2.5 py-1 bg-bg-elevated/60 hover:bg-bg-elevated border border-bg-border transition-colors"
           >
-            <Avatar name={displayName} size="sm" />
+            <Avatar
+              name={displayName}
+              src={resolveAssetUrl(user?.avatarUrl) || undefined}
+              size="sm"
+            />
             <span className="hidden sm:block text-sm font-semibold max-w-[120px] truncate">
               {displayName}
             </span>

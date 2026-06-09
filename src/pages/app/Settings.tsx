@@ -1,5 +1,6 @@
 import {
   Bell,
+  Download,
   Eye,
   Globe,
   KeyRound,
@@ -19,7 +20,7 @@ import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../../contexts/AuthContext';
 import { useLocale } from '../../contexts/LocaleContext';
 import { useColors, useTheme, type ThemeMode } from '../../contexts/ThemeContext';
-import { userPreferencesService } from '../../services/api';
+import { userPreferencesService, accountService } from '../../services/api';
 import { Avatar, Card, PageHeader } from '../../ui';
 
 interface Preferences {
@@ -105,6 +106,38 @@ export default function Settings() {
     if (!confirm('Vous déconnecter ?')) return;
     await logout();
     navigate('/auth/login', { replace: true });
+  };
+
+  // === Export RGPD : fetch + download direct via Blob ===
+  // Pas besoin de lib externe — le navigateur sait déclencher un téléchargement
+  // à partir d'un objet URL pointant sur un Blob.
+  const [exporting, setExporting] = useState(false);
+
+  const handleExportData = async () => {
+    if (exporting) return;
+    if (!confirm(
+      "Vous allez télécharger un fichier JSON contenant toutes vos données : " +
+      "profil, wallet, transactions, bénéficiaires, sessions, notifications. " +
+      "Aucun mot de passe ni token n'est inclus. Continuer ?"
+    )) return;
+    setExporting(true);
+    try {
+      const data = await accountService.exportData();
+      const json = JSON.stringify(data, null, 2);
+      const blob = new Blob([json], { type: 'application/json' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `mpaye-export-${new Date().toISOString().slice(0, 10)}.json`;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      URL.revokeObjectURL(url);
+    } catch (e: any) {
+      alert(e?.response?.data?.message || "Impossible d'exporter vos données");
+    } finally {
+      setExporting(false);
+    }
   };
 
   const fullName = `${user?.prenom || ''} ${user?.nom || ''}`.trim() || user?.email || 'Utilisateur';
@@ -234,27 +267,56 @@ export default function Settings() {
           )}
 
           {section === 'privacy' && (
-            <Card padding="md">
-              <SectionTitle title="Confidentialité & sécurité" subtitle="Contrôlez ce qui est visible et activez les protections" />
-              <div className="mt-4 divide-y divide-bg-border">
-                <ToggleRow
-                  icon={Eye}
-                  title="Afficher le solde par défaut"
-                  description="Masquer le solde au démarrage de l'app"
-                  checked={prefs.showBalance}
-                  onChange={() => save({ showBalance: !prefs.showBalance })}
-                  colors={colors}
+            <div className="space-y-4">
+              <Card padding="md">
+                <SectionTitle title="Confidentialité & sécurité" subtitle="Contrôlez ce qui est visible et activez les protections" />
+                <div className="mt-4 divide-y divide-bg-border">
+                  <ToggleRow
+                    icon={Eye}
+                    title="Afficher le solde par défaut"
+                    description="Masquer le solde au démarrage de l'app"
+                    checked={prefs.showBalance}
+                    onChange={() => save({ showBalance: !prefs.showBalance })}
+                    colors={colors}
+                  />
+                  <ToggleRow
+                    icon={Lock}
+                    title="Authentification à 2 facteurs"
+                    description="Une seconde vérification à chaque connexion"
+                    checked={prefs.twoFactor}
+                    onChange={() => save({ twoFactor: !prefs.twoFactor })}
+                    colors={colors}
+                  />
+                </div>
+              </Card>
+
+              {/* Export RGPD — droit à la portabilité (article 20). Le serveur
+                  renvoie un JSON complet, le navigateur le télécharge directement. */}
+              <Card padding="md">
+                <SectionTitle
+                  title="Mes données"
+                  subtitle="Vous pouvez télécharger l'ensemble de vos données à tout moment."
                 />
-                <ToggleRow
-                  icon={Lock}
-                  title="Authentification à 2 facteurs"
-                  description="Une seconde vérification à chaque connexion"
-                  checked={prefs.twoFactor}
-                  onChange={() => save({ twoFactor: !prefs.twoFactor })}
-                  colors={colors}
-                />
-              </div>
-            </Card>
+                <button
+                  onClick={handleExportData}
+                  disabled={exporting}
+                  className="mt-4 w-full flex items-center gap-3 p-3.5 rounded-xl border border-bg-border bg-bg-elevated hover:bg-bg-elevated/70 text-left transition-colors disabled:opacity-60"
+                >
+                  <div className="w-10 h-10 rounded-lg flex items-center justify-center bg-brand-500/15 text-brand-300 shrink-0">
+                    <Download size={18} />
+                  </div>
+                  <div className="flex-1 min-w-0">
+                    <div className="text-sm font-bold">
+                      {exporting ? 'Préparation du fichier…' : 'Exporter mes données'}
+                    </div>
+                    <div className="text-[11px] text-ink-muted leading-snug mt-0.5">
+                      Profil, wallet, transactions, bénéficiaires, sessions,
+                      notifications — au format JSON. Aucun mot de passe inclus.
+                    </div>
+                  </div>
+                </button>
+              </Card>
+            </div>
           )}
 
           {section === 'account' && (

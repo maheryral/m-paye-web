@@ -50,6 +50,9 @@ import Settings from './pages/app/Settings';
 import TaxiBrousse from './pages/app/TaxiBrousse';
 import TaxiBrousseReservations from './pages/app/TaxiBrousseReservations';
 import TaxiBrousseVoyage from './pages/app/TaxiBrousseVoyage';
+import VehicleRentals from './pages/app/VehicleRentals';
+import VehicleRentalDetail from './pages/app/VehicleRentalDetail';
+import MyVehicleBookings from './pages/app/MyVehicleBookings';
 import TransportScolaire from './pages/app/TransportScolaire';
 import TransportScolaireStudents from './pages/app/TransportScolaireStudents';
 import TransportScolaireSchools from './pages/app/TransportScolaireSchools';
@@ -190,6 +193,10 @@ export const router = createBrowserRouter([
       { path: '/taxi-brousse', element: <TaxiBrousse /> },
       { path: '/taxi-brousse/voyage/:id', element: <TaxiBrousseVoyage /> },
       { path: '/taxi-brousse/reservations', element: <TaxiBrousseReservations /> },
+      // Location de voiture — catalogue + booking
+      { path: '/vehicle-rentals', element: <VehicleRentals /> },
+      { path: '/vehicle-rentals/my-bookings', element: <MyVehicleBookings /> },
+      { path: '/vehicle-rentals/:id', element: <VehicleRentalDetail /> },
       // Transport scolaire
       { path: '/transport-scolaire', element: <TransportScolaire /> },
       { path: '/transport-scolaire/students', element: <TransportScolaireStudents /> },

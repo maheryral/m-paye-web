@@ -1,5 +1,6 @@
 import {
   Calendar,
+  Camera,
   Check,
   Edit3,
   Mail,
@@ -8,16 +9,17 @@ import {
   ShieldCheck,
   ShieldHalf,
   Sparkles,
+  Trash2,
   TrendingUp,
   User as UserIcon,
   X,
   type LucideIcon,
 } from 'lucide-react';
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../../contexts/AuthContext';
 import { useLocale } from '../../contexts/LocaleContext';
-import { accountService } from '../../services/api';
+import { accountService, resolveAssetUrl } from '../../services/api';
 import { Avatar, Badge, Button, Card, Input, PageHeader, Skeleton } from '../../ui';
 
 type KycLevel = 'BASIC' | 'INTERMEDIATE' | 'ADVANCED';
@@ -55,6 +57,53 @@ export default function Profile() {
   const [loading, setLoading] = useState(true);
   const [editing, setEditing] = useState(false);
   const [saving, setSaving] = useState(false);
+
+  // === Photo de profil — upload via file input caché ===
+  const fileInputRef = useRef<HTMLInputElement | null>(null);
+  const [avatarUploading, setAvatarUploading] = useState(false);
+
+  const onAvatarSelected = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    e.target.value = ''; // reset pour permettre de re-sélectionner le même fichier
+    if (!file) return;
+
+    // Validation front — alignée sur les limites backend (4 Mo, JPEG/PNG/WebP).
+    const ALLOWED = ['image/jpeg', 'image/png', 'image/webp'];
+    const MAX = 4 * 1024 * 1024;
+    if (!ALLOWED.includes(file.type)) {
+      alert('Format non supporté (JPEG, PNG ou WebP).');
+      return;
+    }
+    if (file.size > MAX) {
+      alert('Image trop lourde (max 4 Mo).');
+      return;
+    }
+
+    setAvatarUploading(true);
+    try {
+      const updated = await accountService.uploadAvatar(file);
+      // Propage l'URL dans le AuthContext → tous les composants qui affichent
+      // l'avatar (sidebar, topbar, …) se mettent à jour automatiquement.
+      await updateUser({ avatarUrl: updated.avatarUrl });
+    } catch (err: any) {
+      alert(err?.response?.data?.message || "Impossible d'envoyer la photo.");
+    } finally {
+      setAvatarUploading(false);
+    }
+  };
+
+  const handleRemoveAvatar = async () => {
+    if (!confirm('Retirer votre photo de profil ?')) return;
+    setAvatarUploading(true);
+    try {
+      const updated = await accountService.removeAvatar();
+      await updateUser({ avatarUrl: updated.avatarUrl ?? null });
+    } catch (err: any) {
+      alert(err?.response?.data?.message || 'Action impossible.');
+    } finally {
+      setAvatarUploading(false);
+    }
+  };
 
   const [form, setForm] = useState({
     prenom: '',
@@ -181,7 +230,47 @@ export default function Profile() {
         {/* === Profile card (sticky on desktop) === */}
         <div className="space-y-4 lg:sticky lg:top-20 lg:self-start">
           <Card padding="lg" className="text-center">
-            <Avatar name={fullName} size="xl" className="mx-auto" />
+            {/* Avatar cliquable — ouvre le file picker. Overlay caméra au hover
+                pour suggérer l'interaction. Le bouton "Retirer" apparaît
+                uniquement si une photo est déjà définie. */}
+            <input
+              ref={fileInputRef}
+              type="file"
+              accept="image/jpeg,image/png,image/webp"
+              className="hidden"
+              onChange={onAvatarSelected}
+            />
+            <button
+              type="button"
+              onClick={() => fileInputRef.current?.click()}
+              disabled={avatarUploading}
+              className="relative mx-auto block group/avatar"
+              aria-label="Changer la photo de profil"
+            >
+              <Avatar
+                name={fullName}
+                src={resolveAssetUrl(user?.avatarUrl) || undefined}
+                size="xl"
+                className="mx-auto"
+              />
+              <span className="absolute inset-0 rounded-full bg-black/55 opacity-0 group-hover/avatar:opacity-100 transition-opacity flex items-center justify-center">
+                {avatarUploading ? (
+                  <div className="w-5 h-5 border-2 border-white border-t-transparent rounded-full animate-spin" />
+                ) : (
+                  <Camera size={20} className="text-white" />
+                )}
+              </span>
+            </button>
+            {user?.avatarUrl && !avatarUploading && (
+              <button
+                type="button"
+                onClick={handleRemoveAvatar}
+                className="mt-2 inline-flex items-center gap-1 text-[11px] font-semibold text-ink-muted hover:text-danger-400"
+              >
+                <Trash2 size={11} />
+                Retirer la photo
+              </button>
+            )}
             <div className="mt-4 text-lg font-bold truncate">{fullName}</div>
             <div className="text-xs text-ink-muted truncate">{profile.email}</div>
 

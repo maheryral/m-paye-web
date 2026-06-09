@@ -11,6 +11,10 @@ export interface User {
   telephone?: string;
   kycLevel: string;
   isActive: boolean;
+  /** Vrai si l'utilisateur a déjà défini un mot de passe (inscription OTP → false). */
+  hasPassword?: boolean;
+  /** URL relative ou absolue de la photo de profil (servie par /uploads/avatars/users/...). */
+  avatarUrl?: string | null;
 }
 
 interface RegisterData {
@@ -90,7 +94,12 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       // par un précédent refresh KO mais 'user' resté → faux état authentifié
       // qui spam des 401 jusqu'à la redirection).
       if (accessToken && refreshToken && storedUser) {
-        setUser(JSON.parse(storedUser));
+        const parsed = JSON.parse(storedUser) as User;
+        setUser(parsed);
+        // Rafraîchit le profil en arrière-plan pour les champs susceptibles
+        // d'avoir changé (hasPassword, kycLevel) — utile pour les sessions
+        // antérieures à l'ajout du flag hasPassword.
+        void refreshUserFromProfile(parsed);
       } else if (storedUser || accessToken || refreshToken) {
         // État partiel → on nettoie pour repartir propre
         await clearSession();
@@ -99,6 +108,30 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       console.error('Erreur chargement user:', error);
     } finally {
       setLoading(false);
+    }
+  };
+
+  /**
+   * Récupère le profil complet et merge dans le user local. Évite que les
+   * sessions stockées avant l'ajout d'un champ (ex: hasPassword) restent
+   * périmées. Best-effort : KO réseau → on garde le cache.
+   */
+  const refreshUserFromProfile = async (current: User) => {
+    try {
+      const { accountService } = await import('../services/api');
+      const profile = await accountService.getProfile();
+      if (!profile) return;
+      const merged: User = {
+        ...current,
+        kycLevel: profile.kycLevel ?? current.kycLevel,
+        isActive: profile.isActive ?? current.isActive,
+        hasPassword: profile.hasPassword ?? current.hasPassword,
+        avatarUrl: profile.avatarUrl ?? current.avatarUrl,
+      };
+      setUser(merged);
+      await asyncStorage.setItem('user', JSON.stringify(merged));
+    } catch {
+      // Silent : pas critique, on garde le cache local
     }
   };
 
