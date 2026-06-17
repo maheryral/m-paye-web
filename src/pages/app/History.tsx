@@ -39,8 +39,38 @@ interface Tx {
   totalAmount: number;
   createdAt: string;
   isCredit: boolean;
-  sender?: { fullName: string; email: string; telephone: string };
-  receiver?: { fullName: string; email: string; telephone: string };
+  method?: 'CARD' | 'MVOLA' | 'AIRTEL' | 'ORANGE' | 'WALLET' | null;
+  sender?: { fullName: string; email: string; telephone: string; isMerchant?: boolean };
+  receiver?: { fullName: string; email: string; telephone: string; isMerchant?: boolean };
+}
+
+/** Badge du mode de financement (null = wallet, pas de badge). */
+function methodMeta(m?: string | null): { label: string; color: string } | null {
+  switch (m) {
+    case 'CARD':
+      return { label: 'Carte', color: '#6366f1' };
+    case 'MVOLA':
+      return { label: 'MVola', color: '#ec4899' };
+    case 'AIRTEL':
+      return { label: 'Airtel', color: '#ef4444' };
+    case 'ORANGE':
+      return { label: 'Orange', color: '#f97316' };
+    default:
+      return null;
+  }
+}
+
+function MethodBadge({ method }: { method?: string | null }) {
+  const mm = methodMeta(method);
+  if (!mm) return null;
+  return (
+    <span
+      className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded-md text-[10px] font-bold"
+      style={{ color: mm.color, backgroundColor: `${mm.color}1f` }}
+    >
+      {mm.label}
+    </span>
+  );
 }
 
 type FilterType = 'all' | 'credit' | 'debit';
@@ -64,15 +94,116 @@ function fmtTime(iso: string) {
   });
 }
 
+function isMerchantPayment(t: Tx): boolean {
+  if (t.type?.startsWith('PAYMENT')) return true;
+  if (!t.isCredit && t.receiver?.isMerchant) return true;
+  if (t.isCredit && t.sender?.isMerchant) return true;
+  return false;
+}
+
 function txTitle(t: Tx): string {
   if (t.type === 'DEPOSIT') return 'Dépôt wallet';
-  if (t.isCredit && t.sender?.fullName) return `Reçu de ${t.sender.fullName}`;
-  if (!t.isCredit && t.receiver?.fullName) return `Envoyé à ${t.receiver.fullName}`;
+  const merchantPay = isMerchantPayment(t);
+  if (t.isCredit && t.sender?.fullName)
+    return merchantPay ? `Encaissement de ${t.sender.fullName}` : `Reçu de ${t.sender.fullName}`;
+  if (!t.isCredit && t.receiver?.fullName)
+    return merchantPay ? `Paiement à ${t.receiver.fullName}` : `Envoyé à ${t.receiver.fullName}`;
   return t.motif || 'Transaction';
 }
 
 function counterpartName(t: Tx): string {
   return t.sender?.fullName || t.receiver?.fullName || 'M\'Paye';
+}
+
+function typeLabel(t: Tx): string {
+  return t.type === 'DEPOSIT'
+    ? 'Dépôt wallet'
+    : t.type === 'WITHDRAWAL'
+      ? 'Retrait'
+      : isMerchantPayment(t)
+        ? 'Paiement marchand'
+        : 'Transfert';
+}
+
+function escapeHtml(s: string): string {
+  return s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+}
+
+/** Construit le HTML du reçu (rendu en PDF via l'impression navigateur). */
+function buildReceiptHtml(t: Tx): string {
+  const isPos = t.isCredit || t.type === 'DEPOSIT';
+  const sign = isPos ? '+' : '−';
+  const fmt = (n: number) => `${Number(n || 0).toLocaleString('fr-FR')} Ar`;
+  const dateStr = new Date(t.createdAt).toLocaleString('fr-FR');
+  const row = (label: string, value: string, mono = false) =>
+    `<tr><td class="lbl">${label}</td><td class="val"${mono ? ' style="font-family:monospace"' : ''}>${value}</td></tr>`;
+
+  const rows = [
+    row('Type', typeLabel(t)),
+    row('Montant', `<b>${sign}${fmt(t.montant)}</b>`),
+    t.feeAmount > 0 ? row('Frais', fmt(t.feeAmount)) : '',
+    t.totalAmount ? row('Total débité', fmt(t.totalAmount)) : '',
+    row('Statut', t.statut),
+    row('Date', dateStr),
+    t.motif ? row('Motif', escapeHtml(t.motif)) : '',
+    row('Référence', t.reference, true),
+    t.sender
+      ? row('Expéditeur', `${escapeHtml(t.sender.fullName)}<br/><span class="muted">${escapeHtml(t.sender.email || t.sender.telephone || '')}</span>`)
+      : '',
+    t.receiver
+      ? row('Destinataire', `${escapeHtml(t.receiver.fullName)}<br/><span class="muted">${escapeHtml(t.receiver.email || t.receiver.telephone || '')}</span>`)
+      : '',
+  ].join('');
+
+  return `<!DOCTYPE html>
+<html><head><meta charset="utf-8" /><title>Reçu ${escapeHtml(t.reference)}</title>
+<style>
+  * { box-sizing: border-box; }
+  body { font-family: -apple-system, Roboto, 'Segoe UI', sans-serif; color: #0f172a; padding: 40px; max-width: 640px; margin: 0 auto; }
+  .header { display:flex; align-items:center; justify-content:space-between; border-bottom: 3px solid #2563eb; padding-bottom: 16px; }
+  .brand { font-size: 28px; font-weight: 800; color: #2563eb; }
+  .brand span { color:#1e3a8a; }
+  .doc { text-align:right; color:#64748b; font-size:12px; }
+  h1 { font-size: 18px; margin: 28px 0 4px; }
+  .sub { color:#64748b; font-size:12px; margin-bottom:18px; }
+  .amount { text-align:center; margin: 24px 0; }
+  .amount .big { font-size: 36px; font-weight: 800; color:${isPos ? '#16a34a' : '#dc2626'}; }
+  table { width:100%; border-collapse: collapse; margin-top: 8px; }
+  td { padding: 11px 4px; border-bottom: 1px solid #e2e8f0; font-size: 13px; vertical-align: top; }
+  td.lbl { color:#64748b; width: 40%; }
+  td.val { text-align:right; font-weight:600; }
+  .muted { color:#94a3b8; font-weight:400; font-size:11px; }
+  .footer { margin-top: 32px; text-align:center; color:#94a3b8; font-size: 11px; line-height:1.6; }
+  .stamp { display:inline-block; margin-top:14px; padding:6px 14px; border:1.5px solid #16a34a; color:#16a34a; border-radius:8px; font-weight:700; font-size:12px; }
+  @media print { body { padding: 0; } .noprint { display:none; } }
+</style></head>
+<body>
+  <div class="header">
+    <div class="brand">M'<span>Paye</span></div>
+    <div class="doc">REÇU DE TRANSACTION<br/>${new Date(t.createdAt).toLocaleDateString('fr-FR')}</div>
+  </div>
+  <h1>${typeLabel(t)} — ${escapeHtml(t.statut)}</h1>
+  <div class="sub">Référence : ${escapeHtml(t.reference)}</div>
+  <div class="amount"><div class="big">${sign}${fmt(t.montant)}</div></div>
+  <table>${rows}</table>
+  <div class="footer">
+    <div class="stamp">✓ ${escapeHtml(t.statut)}</div>
+    <p>Ce reçu est généré automatiquement par M'Paye et ne nécessite pas de signature.<br/>
+    Conservez-le comme justificatif de votre transaction.</p>
+  </div>
+  <script>window.onload=function(){setTimeout(function(){window.print();},250);};</script>
+</body></html>`;
+}
+
+/** Ouvre le reçu dans une fenêtre et lance l'impression (→ enregistrer en PDF). */
+function printReceipt(t: Tx) {
+  const w = window.open('', '_blank', 'width=760,height=900');
+  if (!w) {
+    alert('Veuillez autoriser les pop-ups pour télécharger le reçu.');
+    return;
+  }
+  w.document.write(buildReceiptHtml(t));
+  w.document.close();
 }
 
 export default function History() {
@@ -436,8 +567,9 @@ export default function History() {
                             )}
                           </div>
                           <div className="min-w-0">
-                            <div className="text-sm font-semibold truncate">
-                              {txTitle(t)}
+                            <div className="text-sm font-semibold truncate flex items-center gap-2">
+                              <span className="truncate">{txTitle(t)}</span>
+                              <MethodBadge method={t.method} />
                             </div>
                             {t.motif && (
                               <div className="text-[11px] text-ink-muted truncate max-w-[260px]">
@@ -501,8 +633,9 @@ export default function History() {
                       )}
                     </div>
                     <div className="flex-1 min-w-0">
-                      <div className="text-sm font-semibold truncate">
-                        {txTitle(t)}
+                      <div className="text-sm font-semibold truncate flex items-center gap-2">
+                        <span className="truncate">{txTitle(t)}</span>
+                        <MethodBadge method={t.method} />
                       </div>
                       <div className="text-[11px] text-ink-muted">
                         {fmtDate(t.createdAt)} · {fmtTime(t.createdAt)}
@@ -692,6 +825,11 @@ function DetailsPanel({ tx, onClose }: { tx: Tx; onClose: () => void }) {
             <DetailRow label="Type">
               {tx.type === 'DEPOSIT' ? 'Dépôt wallet' : 'Transfert'}
             </DetailRow>
+            {methodMeta(tx.method) && (
+              <DetailRow label="Payé via">
+                <MethodBadge method={tx.method} />
+              </DetailRow>
+            )}
             <DetailRow label="Date">
               {fmtDate(tx.createdAt)} à {fmtTime(tx.createdAt)}
             </DetailRow>
@@ -728,7 +866,7 @@ function DetailsPanel({ tx, onClose }: { tx: Tx; onClose: () => void }) {
           <Button variant="secondary" size="md" fullWidth onClick={onClose}>
             Fermer
           </Button>
-          <Button variant="primary" size="md" fullWidth icon={Download}>
+          <Button variant="primary" size="md" fullWidth icon={Download} onClick={() => printReceipt(tx)}>
             Reçu PDF
           </Button>
         </div>

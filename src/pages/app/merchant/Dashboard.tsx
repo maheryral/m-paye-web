@@ -107,7 +107,7 @@ export default function MerchantDashboard() {
             variant="primary"
             size="md"
             icon={TrendingUp}
-            onClick={() => navigate('/seller-mode')}
+            onClick={() => navigate('/merchant/qrcode')}
           >
             Encaisser
           </Button>

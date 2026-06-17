@@ -143,16 +143,24 @@ export const taxiBrousseApi = {
     }),
   getMyReservations: () => api.get<Reservation[]>('/reservations/me'),
   getReservation: (id: string) => api.get<Reservation>(`/reservations/${id}`),
-  payReservation: (id: string, mode: 'wallet' | 'cash' | 'mobile_money' = 'wallet') =>
-    api.post<Reservation>(`/reservations/${id}/pay`, { mode }),
+  payReservation: (
+    id: string,
+    mode: 'wallet' | 'cash' | 'mobile_money' | 'card' = 'wallet',
+    advanceMode: 'wallet' | 'mobile_money' | 'card' = 'wallet',
+  ) => api.post<Reservation>(`/reservations/${id}/pay`, { mode, advanceMode }),
   payReservationBatch: (
     reservationIds: string[],
-    mode: 'wallet' | 'cash' | 'mobile_money' = 'wallet',
+    mode: 'wallet' | 'cash' | 'mobile_money' | 'card' = 'wallet',
+    advanceMode: 'wallet' | 'mobile_money' | 'card' = 'wallet',
   ) =>
-    api.post<{ ok: boolean; count: number; montantTotal: number }>(
-      '/reservations/pay-batch',
-      { reservationIds, mode },
-    ),
+    api.post<{
+      ok: boolean;
+      count: number;
+      montantTotal: number;
+      montantPaye?: number;
+      reste?: number;
+      isAcompte?: boolean;
+    }>('/reservations/pay-batch', { reservationIds, mode, advanceMode }),
   cancelReservation: (id: string) =>
     api.patch(`/reservations/${id}/cancel`),
 };

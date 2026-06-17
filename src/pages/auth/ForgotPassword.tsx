@@ -45,7 +45,7 @@ export default function ForgotPassword() {
           <div className="text-sm text-ink-muted">
             Nous avons envoyé un lien de réinitialisation à
           </div>
-          <div className="text-sm font-bold text-brand-300 mt-1">{email}</div>
+          <div className="text-sm font-bold text-brand-500 mt-1">{email}</div>
           <div className="text-xs text-ink-dim mt-3">
             Le lien expire dans 1 heure. Vérifiez vos spams si vous ne le voyez pas.
           </div>
@@ -72,7 +72,7 @@ export default function ForgotPassword() {
           Vous vous en souvenez ?{' '}
           <Link
             to="/auth/login"
-            className="text-brand-300 font-semibold hover:text-brand-200"
+            className="text-brand-500 font-semibold hover:text-brand-600"
           >
             Se connecter
           </Link>

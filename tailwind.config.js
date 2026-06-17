@@ -1,17 +1,25 @@
 /** @type {import('tailwindcss').Config} */
 export default {
   content: ['./index.html', './src/**/*.{js,ts,jsx,tsx}'],
+  // Ces classes composants sont construites dynamiquement (`btn-${size}`,
+  // `btn-${variant}`) dans Button.tsx → Tailwind ne les détecte pas dans le
+  // scan du contenu et les purgerait. On les force ici (padding + variantes).
+  safelist: [
+    'btn-sm', 'btn-md', 'btn-lg',
+    'btn-primary', 'btn-secondary', 'btn-ghost', 'btn-danger', 'btn-success',
+  ],
   darkMode: 'class',
   theme: {
     extend: {
       colors: {
-        // === Surfaces (dark mode par défaut, Revolut-like) ===
+        // === Surfaces — pilotées par variables CSS (clair par défaut = palette
+        // mobile ; sombre via la classe .dark). Voir index.css. ===
         bg: {
-          DEFAULT: '#0A0E1A',       // page background
-          surface: '#12172A',       // card
-          elevated: '#1A2138',      // card hover / inputs
-          border: '#262F4A',        // dividers
-          subtle: 'rgba(255,255,255,0.04)', // hover faint
+          DEFAULT: 'rgb(var(--bg) / <alpha-value>)',          // page background
+          surface: 'rgb(var(--bg-surface) / <alpha-value>)',  // card
+          elevated: 'rgb(var(--bg-elevated) / <alpha-value>)',// card hover / inputs
+          border: 'rgb(var(--bg-border) / <alpha-value>)',    // dividers
+          subtle: 'rgb(var(--ink) / 0.05)',                   // hover faint
         },
         // === Brand — CSS variable, pilotée depuis super-admin → AppTheme ===
         // Variables stockées en canaux RGB (`r g b`, sans rgb()), ce qui permet
@@ -52,16 +60,16 @@ export default {
           400: '#FB7185',
           bg:   'rgba(244, 63, 94, 0.12)',
         },
-        // === Text on dark surfaces ===
+        // === Texte — piloté par variables CSS (foncé en clair, blanc en sombre) ===
         ink: {
-          DEFAULT: '#FFFFFF',
-          muted:   '#9BA1B0',
-          dim:     '#5F6679',
+          DEFAULT: 'rgb(var(--ink) / <alpha-value>)',
+          muted:   'rgb(var(--ink-muted) / <alpha-value>)',
+          dim:     'rgb(var(--ink-dim) / <alpha-value>)',
         },
       },
       fontFamily: {
-        sans: ['Inter', 'system-ui', '-apple-system', 'BlinkMacSystemFont', 'Segoe UI', 'sans-serif'],
-        display: ['Inter', 'system-ui', 'sans-serif'],
+        sans: ['Poppins', 'system-ui', '-apple-system', 'BlinkMacSystemFont', 'Segoe UI', 'sans-serif'],
+        display: ['Poppins', 'system-ui', 'sans-serif'],
       },
       borderRadius: {
         xl: '14px',
@@ -70,20 +78,21 @@ export default {
         '4xl': '32px',
       },
       boxShadow: {
-        glow:        '0 10px 40px -10px rgba(91, 82, 232, 0.45)',
-        'glow-soft': '0 6px 24px -6px rgba(91, 82, 232, 0.30)',
-        card:        '0 1px 0 rgba(255,255,255,0.04) inset, 0 8px 20px -8px rgba(0,0,0,0.4)',
-        elevated:    '0 12px 40px -10px rgba(0,0,0,0.6)',
+        glow:        '0 10px 40px -10px rgba(37, 99, 235, 0.40)',
+        'glow-soft': '0 6px 24px -6px rgba(37, 99, 235, 0.28)',
+        card:        '0 1px 3px rgba(15,23,42,0.06), 0 8px 24px -12px rgba(15,23,42,0.10)',
+        elevated:    '0 12px 40px -10px rgba(15,23,42,0.18)',
       },
       backgroundImage: {
-        'gradient-brand':   'linear-gradient(135deg, #6366F1 0%, #8B5CF6 50%, #A855F7 100%)',
-        'gradient-brand-soft': 'linear-gradient(135deg, rgba(99,102,241,0.18) 0%, rgba(168,85,247,0.18) 100%)',
-        'gradient-balance': 'linear-gradient(135deg, #4F46E5 0%, #7C3AED 50%, #DB2777 100%)',
-        'gradient-cyan':    'linear-gradient(135deg, #0891B2 0%, #06B6D4 100%)',
+        // Dégradés bleus identiques au mobile
+        'gradient-brand':   'linear-gradient(135deg, #2563EB 0%, #1E40AF 100%)',
+        'gradient-brand-soft': 'linear-gradient(135deg, rgba(37,99,235,0.12) 0%, rgba(30,64,175,0.12) 100%)',
+        'gradient-balance': 'linear-gradient(135deg, #3B82F6 0%, #1E40AF 60%, #1E3A8A 100%)',
+        'gradient-cyan':    'linear-gradient(135deg, #0EA5E9 0%, #2563EB 100%)',
         'gradient-mesh': `
-          radial-gradient(at 0% 0%, rgba(99, 102, 241, 0.20) 0px, transparent 50%),
-          radial-gradient(at 100% 0%, rgba(217, 70, 239, 0.18) 0px, transparent 50%),
-          radial-gradient(at 100% 100%, rgba(14, 165, 233, 0.15) 0px, transparent 50%)
+          radial-gradient(at 0% 0%, rgba(37, 99, 235, 0.12) 0px, transparent 50%),
+          radial-gradient(at 100% 0%, rgba(59, 130, 246, 0.10) 0px, transparent 50%),
+          radial-gradient(at 100% 100%, rgba(139, 92, 246, 0.08) 0px, transparent 50%)
         `,
       },
       animation: {

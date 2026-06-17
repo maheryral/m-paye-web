@@ -1,3 +1,4 @@
+@import url('https://fonts.googleapis.com/css2?family=Poppins:wght@400;500;600;700;800&display=swap');
 @tailwind base;
 @tailwind components;
 @tailwind utilities;
@@ -9,23 +10,38 @@
    `bg-brand-500/20` en injectant <alpha-value> dans `rgb(var(--c) / <alpha>)`.
    Le ThemeContext convertit les hex de l'API vers ce format au boot.
    ───────────────────────────────────────────────────────── */
+/* ── Clair par défaut = palette du mobile (background #f8fafc, card #fff…) ── */
 :root {
-  --color-primary:      59 130 246;   /* #3b82f6 */
-  --color-primary-dark: 37 99 235;    /* #2563eb */
-  --color-secondary:    167 139 250;  /* #a78bfa */
+  /* Surfaces */
+  --bg:          248 250 252;  /* #f8fafc */
+  --bg-surface:  255 255 255;  /* #ffffff */
+  --bg-elevated: 241 245 249;  /* #f1f5f9 */
+  --bg-border:   226 232 240;  /* #e2e8f0 */
+  /* Texte */
+  --ink:         15 23 42;     /* #0f172a */
+  --ink-muted:   100 116 139;  /* #64748b */
+  --ink-dim:     148 163 184;  /* #94a3b8 */
+  /* Brand (fallback ; surchargé inline par le ThemeContext) */
+  --color-primary:      37 99 235;    /* #2563eb */
+  --color-primary-dark: 29 78 216;    /* #1d4ed8 */
+  --color-secondary:    139 92 246;   /* #8b5cf6 */
   --color-success:      16 185 129;   /* #10b981 */
   --color-warning:      245 158 11;   /* #f59e0b */
   --color-danger:       239 68 68;    /* #ef4444 */
 }
 
-/* Mode light override (quand <html> n'a PAS la classe "dark") */
-html:not(.dark) {
-  --color-primary:      37 99 235;    /* #2563eb */
-  --color-primary-dark: 29 78 216;    /* #1d4ed8 */
-  --color-secondary:    139 92 246;   /* #8b5cf6 */
-  --color-success:      16 185 129;
-  --color-warning:      245 158 11;
-  --color-danger:       239 68 68;
+/* ── Mode sombre (classe .dark ajoutée par le ThemeContext) ── */
+.dark {
+  --bg:          10 14 26;     /* #0A0E1A */
+  --bg-surface:  18 23 42;     /* #12172A */
+  --bg-elevated: 26 33 56;     /* #1A2138 */
+  --bg-border:   38 47 74;     /* #262F4A */
+  --ink:         255 255 255;
+  --ink-muted:   155 161 176;  /* #9BA1B0 */
+  --ink-dim:     95 102 121;   /* #5F6679 */
+  --color-primary:      59 130 246;   /* #3b82f6 */
+  --color-primary-dark: 37 99 235;    /* #2563eb */
+  --color-secondary:    167 139 250;  /* #a78bfa */
 }
 
 @layer base {
@@ -35,7 +51,7 @@ html:not(.dark) {
     margin: 0;
     font-feature-settings: 'cv11', 'ss01', 'ss03';
   }
-  ::selection { background: rgba(99, 102, 241, 0.35); }
+  ::selection { background: rgba(37, 99, 235, 0.22); }
 }
 
 @layer components {
@@ -51,7 +67,7 @@ html:not(.dark) {
   .btn-lg { @apply px-5 py-3 text-sm; }
 
   .btn-primary {
-    @apply bg-gradient-brand text-white shadow-glow-soft hover:shadow-glow active:scale-[0.98];
+    @apply bg-gradient-brand text-white shadow-sm hover:brightness-110 active:scale-[0.98];
   }
   .btn-secondary {
     @apply bg-bg-elevated text-ink border border-bg-border hover:bg-bg-elevated/70 active:scale-[0.98];
@@ -106,12 +122,14 @@ html:not(.dark) {
   }
 }
 
-/* Scrollbar */
+/* Scrollbar — s'adapte au thème via la couleur du texte */
 ::-webkit-scrollbar { width: 8px; height: 8px; }
 ::-webkit-scrollbar-track { background: transparent; }
-::-webkit-scrollbar-thumb { background: #262F4A; border-radius: 8px; }
-::-webkit-scrollbar-thumb:hover { background: #3a4470; }
+::-webkit-scrollbar-thumb { background: rgb(var(--ink) / 0.18); border-radius: 8px; }
+::-webkit-scrollbar-thumb:hover { background: rgb(var(--ink) / 0.30); }
 
-/* Date picker icon dark */
-input[type='date']::-webkit-calendar-picker-indicator { filter: invert(0.7); cursor: pointer; }
-input[type='datetime-local']::-webkit-calendar-picker-indicator { filter: invert(0.7); }
+/* Date picker : icône foncée en clair, claire en sombre */
+input[type='date']::-webkit-calendar-picker-indicator,
+input[type='datetime-local']::-webkit-calendar-picker-indicator { cursor: pointer; }
+.dark input[type='date']::-webkit-calendar-picker-indicator,
+.dark input[type='datetime-local']::-webkit-calendar-picker-indicator { filter: invert(0.9); }

@@ -1,6 +1,7 @@
-import { createBrowserRouter, Navigate } from 'react-router-dom';
+import { createBrowserRouter } from 'react-router-dom';
 import AppLayout from './components/AppLayout';
 import { GuestOnlyRoute, ProtectedRoute } from './components/ProtectedRoute';
+import Landing from './pages/Landing';
 
 // Auth
 import ForgotPassword from './pages/auth/ForgotPassword';
@@ -32,6 +33,8 @@ import MerchantReports from './pages/app/merchant/Reports';
 import MerchantEmployees from './pages/app/merchant/Employees';
 import MerchantNotifications from './pages/app/merchant/Notifications';
 import MerchantHelp from './pages/app/merchant/Help';
+import MerchantProfile from './pages/app/merchant/Profile';
+import MerchantQrcode from './pages/app/merchant/Qrcode';
 import Loyalty from './pages/app/Loyalty';
 import PayLink from './pages/app/PayLink';
 import FlightBooking from './pages/app/FlightBooking';
@@ -53,6 +56,9 @@ import TaxiBrousseVoyage from './pages/app/TaxiBrousseVoyage';
 import VehicleRentals from './pages/app/VehicleRentals';
 import VehicleRentalDetail from './pages/app/VehicleRentalDetail';
 import MyVehicleBookings from './pages/app/MyVehicleBookings';
+import Tontines from './pages/app/Tontines';
+import TontineNew from './pages/app/TontineNew';
+import TontineDetail from './pages/app/TontineDetail';
 import TransportScolaire from './pages/app/TransportScolaire';
 import TransportScolaireStudents from './pages/app/TransportScolaireStudents';
 import TransportScolaireSchools from './pages/app/TransportScolaireSchools';
@@ -88,8 +94,8 @@ import NotFound from './pages/NotFound';
 const guest = (el: React.ReactNode) => <GuestOnlyRoute>{el}</GuestOnlyRoute>;
 
 export const router = createBrowserRouter([
-  // Root → dashboard
-  { path: '/', element: <Navigate to="/dashboard" replace /> },
+  // Root → landing publique (redirige vers /dashboard si déjà connecté)
+  { path: '/', element: <Landing /> },
 
   // Auth (no shell)
   { path: '/auth/login', element: guest(<Login />) },
@@ -171,6 +177,8 @@ export const router = createBrowserRouter([
       { path: '/seller-mode', element: <SellerMode /> },
       { path: '/merchant-signup', element: <MerchantSignup /> },
       { path: '/merchant', element: <MerchantDashboard /> },
+      { path: '/merchant/profile', element: <MerchantProfile /> },
+      { path: '/merchant/qrcode', element: <MerchantQrcode /> },
       { path: '/merchant/payment-links', element: <MerchantPaymentLinks /> },
       { path: '/merchant/scanner', element: <MerchantScanner /> },
       { path: '/merchant/analytics', element: <MerchantAnalytics /> },
@@ -197,6 +205,10 @@ export const router = createBrowserRouter([
       { path: '/vehicle-rentals', element: <VehicleRentals /> },
       { path: '/vehicle-rentals/my-bookings', element: <MyVehicleBookings /> },
       { path: '/vehicle-rentals/:id', element: <VehicleRentalDetail /> },
+      // Tontines — épargne collective rotative
+      { path: '/tontines', element: <Tontines /> },
+      { path: '/tontines/new', element: <TontineNew /> },
+      { path: '/tontines/:id', element: <TontineDetail /> },
       // Transport scolaire
       { path: '/transport-scolaire', element: <TransportScolaire /> },
       { path: '/transport-scolaire/students', element: <TransportScolaireStudents /> },

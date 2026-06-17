@@ -24,8 +24,10 @@ import {
   Receipt,
   ScanLine,
   Undo2,
+  Moon,
   Search,
   Send,
+  Sun,
   Settings,
   Shield,
   ShieldCheck,
@@ -43,7 +45,26 @@ import { secureStorage } from '../services/storage';
 import { Link, NavLink, Outlet, useLocation, useNavigate } from 'react-router-dom';
 import { Avatar, Button } from '../ui';
 import { useAuth } from '../contexts/AuthContext';
+import { useTheme } from '../contexts/ThemeContext';
+import { billersApi, type PublicBiller } from '../services/billersApi';
 import { resolveAssetUrl } from '../services/api';
+
+/** Pages de l'app cherchables depuis la barre de recherche. */
+const SEARCH_PAGES: { label: string; path: string; kw?: string }[] = [
+  { label: 'Tableau de bord', path: '/dashboard', kw: 'accueil home' },
+  { label: 'Portefeuille', path: '/portfolio', kw: 'dépôt retrait recharge wallet carte' },
+  { label: 'Transferts', path: '/transfers', kw: 'envoyer argent' },
+  { label: 'Historique', path: '/history', kw: 'transactions reçu' },
+  { label: 'Services & Factures', path: '/bills', kw: 'factures mini-programs' },
+  { label: 'Bénéficiaires', path: '/beneficiaries', kw: 'contacts' },
+  { label: 'Scanner QR', path: '/qr-payment', kw: 'qr code payer scan' },
+  { label: 'Recevoir un paiement', path: '/seller-mode', kw: 'vendeur encaisser' },
+  { label: 'Notifications', path: '/notifications', kw: 'alertes' },
+  { label: 'Premium', path: '/premium', kw: 'cashback avantages' },
+  { label: 'Paramètres', path: '/settings', kw: 'préférences thème langue' },
+  { label: 'Sécurité', path: '/security', kw: 'mot de passe pin' },
+  { label: 'Profil', path: '/profile', kw: 'compte' },
+];
 import { useSocket } from '../contexts/SocketContext';
 
 interface NavGroup {
@@ -104,6 +125,8 @@ const GROUPS: NavGroup[] = [
     merchantOnly: true,
     items: [
       { to: '/merchant', label: 'Tableau marchand', icon: LayoutDashboard, cap: 'dashboard' },
+      { to: '/merchant/profile', label: 'Mon entreprise', icon: Building2 },
+      { to: '/merchant/qrcode', label: 'Encaisser', icon: QrCode, cap: 'collect' },
       { to: '/merchant/payment-links', label: 'Liens de paiement', icon: Link2, cap: 'collect' },
       { to: '/merchant/scanner', label: 'Scanner client', icon: ScanLine, cap: 'collect' },
       { to: '/merchant/analytics', label: 'Analytics', icon: BarChart3, cap: 'dashboard' },
@@ -130,6 +153,7 @@ const GROUPS: NavGroup[] = [
       { to: '/hotels', label: 'Hôtels', icon: Building2 },
       { to: '/flight-booking', label: 'Vols', icon: Plane },
       { to: '/vehicle-rentals', label: 'Location voiture', icon: Car },
+      { to: '/tontines', label: 'Tontines', icon: Users },
     ],
   },
   {
@@ -234,17 +258,11 @@ export default function AppLayout() {
   const handleLogout = async () => {
     setUserMenuOpen(false);
     await logout();
-    navigate('/auth/login', { replace: true });
+    navigate('/', { replace: true }); // retour à la page d'accueil (landing)
   };
 
   return (
     <div className="min-h-screen bg-bg text-ink">
-      {/* Mesh background gradient */}
-      <div
-        className="fixed inset-0 bg-gradient-mesh opacity-60 pointer-events-none"
-        aria-hidden
-      />
-
       <div className="relative flex min-h-screen">
         {/* ===== Sidebar desktop — sticky, reste collée au scroll ===== */}
         <aside className="hidden lg:flex flex-col w-64 shrink-0 sticky top-0 h-screen border-r border-bg-border bg-bg-surface/80 backdrop-blur-xl">
@@ -448,7 +466,67 @@ function Topbar({
   unreadCount: number;
 }) {
   const navigate = useNavigate();
+  const { isDark, toggleTheme } = useTheme();
   const displayName = user?.prenom ? `${user.prenom} ${user.nom || ''}`.trim() : user?.email || 'Utilisateur';
+
+  // ── Recherche (services + pages) ──
+  const [q, setQ] = useState('');
+  const [focused, setFocused] = useState(false);
+  const [billers, setBillers] = useState<PublicBiller[]>([]);
+
+  useEffect(() => {
+    let cancelled = false;
+    billersApi
+      .list()
+      .then((list) => {
+        if (!cancelled) setBillers(Array.isArray(list) ? list : []);
+      })
+      .catch(() => {});
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  const query = q.trim().toLowerCase();
+  const pageHits = query
+    ? SEARCH_PAGES.filter((p) => `${p.label} ${p.kw ?? ''}`.toLowerCase().includes(query)).slice(0, 5)
+    : [];
+  const billerHits = query
+    ? billers
+        .filter((b) =>
+          `${b.name} ${b.description ?? ''} ${b.serviceType?.label ?? ''}`
+            .toLowerCase()
+            .includes(query),
+        )
+        .slice(0, 6)
+    : [];
+  const hasResults = pageHits.length > 0 || billerHits.length > 0;
+
+  const openBiller = (b: PublicBiller) => {
+    const path = b.redirectPath;
+    setQ('');
+    setFocused(false);
+    if (!/^https?:\/\//i.test(path)) {
+      navigate(path);
+      return;
+    }
+    try {
+      const u = new URL(path);
+      if (u.origin === window.location.origin) {
+        navigate(u.pathname + u.search + u.hash);
+        return;
+      }
+    } catch {
+      /* URL invalide */
+    }
+    window.open(path, '_blank', 'noopener,noreferrer');
+  };
+
+  const goPage = (path: string) => {
+    setQ('');
+    setFocused(false);
+    navigate(path);
+  };
 
   return (
     <header className="sticky top-0 z-30 h-16 border-b border-bg-border bg-bg-surface/80 backdrop-blur-xl">
@@ -470,10 +548,74 @@ function Topbar({
               className="absolute left-3 top-1/2 -translate-y-1/2 text-ink-dim pointer-events-none"
             />
             <input
-              type="search"
-              placeholder="Rechercher..."
+              type="text"
+              value={q}
+              onChange={(e) => setQ(e.target.value)}
+              onFocus={() => setFocused(true)}
+              onBlur={() => setTimeout(() => setFocused(false), 150)}
+              placeholder="Rechercher un service, une page…"
               className="w-full bg-bg-elevated/60 border border-bg-border rounded-xl pl-9 pr-3 py-2 text-sm placeholder:text-ink-dim outline-none focus:border-brand-500 focus:bg-bg-elevated"
             />
+
+            {/* Dropdown résultats */}
+            {focused && query.length > 0 && (
+              <div className="absolute left-0 right-0 top-full mt-2 bg-bg-surface border border-bg-border rounded-xl shadow-elevated overflow-hidden z-50 max-h-[60vh] overflow-y-auto">
+                {!hasResults ? (
+                  <div className="px-4 py-6 text-center text-sm text-ink-muted">
+                    Aucun résultat pour « {q.trim()} »
+                  </div>
+                ) : (
+                  <>
+                    {billerHits.length > 0 && (
+                      <div className="py-1">
+                        <div className="px-3 pt-2 pb-1 text-[10px] font-bold uppercase tracking-wider text-ink-dim">
+                          Services
+                        </div>
+                        {billerHits.map((b) => (
+                          <button
+                            key={b.id}
+                            onMouseDown={(e) => e.preventDefault()}
+                            onClick={() => openBiller(b)}
+                            className="w-full flex items-center gap-3 px-3 py-2 hover:bg-bg-subtle text-left"
+                          >
+                            <span
+                              className="w-7 h-7 rounded-lg flex items-center justify-center text-white text-[11px] font-bold shrink-0"
+                              style={{ background: b.color || '#2563eb' }}
+                            >
+                              {b.name.charAt(0).toUpperCase()}
+                            </span>
+                            <span className="min-w-0">
+                              <span className="block text-sm font-semibold truncate">{b.name}</span>
+                              <span className="block text-[11px] text-ink-muted truncate">
+                                {b.serviceType?.label ?? 'Service'}
+                              </span>
+                            </span>
+                          </button>
+                        ))}
+                      </div>
+                    )}
+                    {pageHits.length > 0 && (
+                      <div className="py-1 border-t border-bg-border">
+                        <div className="px-3 pt-2 pb-1 text-[10px] font-bold uppercase tracking-wider text-ink-dim">
+                          Pages
+                        </div>
+                        {pageHits.map((p) => (
+                          <button
+                            key={p.path}
+                            onMouseDown={(e) => e.preventDefault()}
+                            onClick={() => goPage(p.path)}
+                            className="w-full flex items-center gap-3 px-3 py-2 hover:bg-bg-subtle text-left"
+                          >
+                            <Search size={14} className="text-ink-dim shrink-0" />
+                            <span className="text-sm font-medium truncate">{p.label}</span>
+                          </button>
+                        ))}
+                      </div>
+                    )}
+                  </>
+                )}
+              </div>
+            )}
           </div>
         </div>
 
@@ -489,6 +631,16 @@ function Topbar({
         >
           Envoyer
         </Button>
+
+        {/* Toggle thème clair/sombre */}
+        <button
+          onClick={toggleTheme}
+          className="w-9 h-9 rounded-xl bg-bg-elevated/60 hover:bg-bg-elevated border border-bg-border flex items-center justify-center text-ink-muted hover:text-ink transition-colors"
+          aria-label={isDark ? 'Passer en mode clair' : 'Passer en mode sombre'}
+          title={isDark ? 'Mode clair' : 'Mode sombre'}
+        >
+          {isDark ? <Sun size={17} /> : <Moon size={17} />}
+        </button>
 
         {/* Notifications */}
         <button

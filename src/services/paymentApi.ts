@@ -69,6 +69,12 @@ export const paymentApi = {
     api.post<StripeIntentResponse>('/payments/stripe/intent', { amount }),
   confirmStripeDeposit: (paymentRequestId: string) =>
     api.post<PaymentRequest>(`/payments/stripe/${paymentRequestId}/confirm`),
+
+  // Paiement DIRECT par carte vers un autre user (débit carte, wallet jamais touché)
+  createCardTransferIntent: (toPhone: string, amount: number) =>
+    api.post<StripeIntentResponse>('/payments/stripe/transfer/intent', { toPhone, amount }),
+  confirmCardTransfer: (paymentRequestId: string) =>
+    api.post<PaymentRequest>(`/payments/stripe/transfer/${paymentRequestId}/confirm`),
 };
 
 export default paymentApi;

@@ -194,7 +194,7 @@ export default function Login() {
         step === 'identifier' ? (
           <>
             Pas encore de compte ?{' '}
-            <Link to="/auth/register" className="text-brand-300 font-semibold hover:text-brand-200">
+            <Link to="/auth/register" className="text-brand-500 font-semibold hover:text-brand-600">
               Créer un compte
             </Link>
           </>
@@ -239,7 +239,7 @@ export default function Login() {
             <div>
               <label className="label">Numéro de téléphone</label>
               <div className="flex">
-                <div className="px-3 flex items-center bg-bg-elevated border border-bg-border border-r-0 rounded-l-xl text-brand-300 font-bold text-sm">
+                <div className="px-3 flex items-center bg-bg-elevated border border-bg-border border-r-0 rounded-l-xl text-brand-500 font-bold text-sm">
                   +261
                 </div>
                 <input
@@ -317,7 +317,7 @@ export default function Login() {
                 className="card-interactive w-full p-4 text-left flex items-center gap-3"
               >
                 <div className="w-11 h-11 rounded-xl bg-gradient-brand-soft border border-brand-500/20 flex items-center justify-center shrink-0">
-                  <Icon size={20} className="text-brand-300" />
+                  <Icon size={20} className="text-brand-500" />
                 </div>
                 <div className="flex-1 min-w-0">
                   <div className="font-bold text-sm">{m.title}</div>
@@ -370,7 +370,7 @@ export default function Login() {
               type="button"
               onClick={() => void sendOTP()}
               disabled={loading}
-              className="text-brand-300 font-semibold hover:text-brand-200 disabled:opacity-50"
+              className="text-brand-500 font-semibold hover:text-brand-600 disabled:opacity-50"
             >
               Mot de passe oublié ?
             </button>
@@ -409,13 +409,13 @@ export default function Login() {
             {!canResend ? (
               <span className="text-ink-muted">
                 Renvoyer dans{' '}
-                <span className="text-brand-300 font-bold">{timer}s</span>
+                <span className="text-brand-500 font-bold">{timer}s</span>
               </span>
             ) : (
               <button
                 type="button"
                 onClick={() => void sendOTP()}
-                className="text-brand-300 font-semibold hover:text-brand-200"
+                className="text-brand-500 font-semibold hover:text-brand-600"
               >
                 Renvoyer le code
               </button>

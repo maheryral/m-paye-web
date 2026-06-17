@@ -1,6 +1,5 @@
 import {
   ArrowDownToLine,
-  ArrowLeft as ArrowLeftIcon,
   ArrowUpFromLine,
   Building2,
   CheckCircle2,
@@ -492,21 +491,27 @@ export default function Portfolio() {
       {/* MODAL PLEIN ÉCRAN — formulaire de dépôt / retrait par méthode  */}
       {/* ============================================================== */}
       {methodModal && method && (
-        <div className="fixed inset-0 z-40 bg-bg-base overflow-y-auto animate-fade-in">
-          <div className="max-w-2xl mx-auto p-4 sm:p-6 space-y-4">
+        <div
+          className="fixed inset-0 z-40 bg-black/50 backdrop-blur-sm overflow-y-auto animate-fade-in"
+          onClick={() => !submitting && closeMethodModal()}
+        >
+          <div
+            className="max-w-2xl mx-auto my-6 p-4 sm:p-6 space-y-4"
+            onClick={(e) => e.stopPropagation()}
+          >
             {/* Header */}
-            <div className="flex items-center justify-between sticky top-0 bg-bg-base py-3 z-10">
-              <button
-                onClick={closeMethodModal}
-                disabled={submitting}
-                className="flex items-center gap-2 text-sm font-semibold text-ink-muted hover:text-ink"
-              >
-                <ArrowLeftIcon size={16} />
-                Retour aux méthodes
-              </button>
+            <div className="flex items-center justify-between sticky top-0 bg-bg-surface/90 backdrop-blur-md rounded-xl px-4 py-3 border border-bg-border z-10">
               <Badge tone={tab === 'deposit' ? 'success' : 'danger'}>
                 {tab === 'deposit' ? 'Dépôt' : 'Retrait'}
               </Badge>
+              <button
+                onClick={closeMethodModal}
+                disabled={submitting}
+                aria-label="Fermer"
+                className="p-1.5 rounded-lg text-ink-muted hover:text-ink hover:bg-bg-elevated disabled:opacity-50"
+              >
+                <X size={18} />
+              </button>
             </div>
 
             {/* Card-header de la méthode */}

@@ -6,6 +6,8 @@ export interface MerchantProfile {
   businessType: string;
   registrationNumber: string;
   isActive: boolean;
+  validationStatus?: string;
+  rejectionReason?: string;
   balance: number;
   storeCount: number;
   verifiedAt?: string;
@@ -13,6 +15,9 @@ export interface MerchantProfile {
   phone?: string;
   email?: string;
   description?: string;
+  logoUrl?: string;
+  coverUrl?: string;
+  website?: string;
   defaultTaxRate?: number;
   vatNumber?: string;
 }
@@ -283,6 +288,29 @@ export const merchantApi = {
     }),
   updateProfile: (data: Partial<MerchantProfile>) =>
     api.put('/merchant/profile', data),
+
+  /**
+   * Upload du logo marchand — multipart/form-data, clé `file`.
+   * `file` est un `File` issu d'un `<input type="file">`. Renvoie le profil.
+   */
+  uploadLogo: (file: File) => {
+    const form = new FormData();
+    form.append('file', file);
+    return api.post<MerchantProfile>('/merchant/profile/logo', form, {
+      headers: { 'Content-Type': 'multipart/form-data' },
+    });
+  },
+  removeLogo: () => api.delete<MerchantProfile>('/merchant/profile/logo'),
+
+  /** Upload de la couverture marchand — multipart/form-data, clé `file`. */
+  uploadCover: (file: File) => {
+    const form = new FormData();
+    form.append('file', file);
+    return api.post<MerchantProfile>('/merchant/profile/cover', form, {
+      headers: { 'Content-Type': 'multipart/form-data' },
+    });
+  },
+  removeCover: () => api.delete<MerchantProfile>('/merchant/profile/cover'),
 
   // Dashboard & analytics
   getDashboardStats: () => api.get<DashboardStats>('/merchant/dashboard/stats'),

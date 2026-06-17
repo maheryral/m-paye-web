@@ -348,6 +348,69 @@ export interface RentalBooking {
   };
 }
 
+// ════════════════════════════════════════════════════════════════════════════
+// Tontines — épargne collective rotative (vakana)
+// ════════════════════════════════════════════════════════════════════════════
+
+export interface TontineMember {
+  id: string;
+  userId: string;
+  status: 'invited' | 'joined' | 'declined' | 'left';
+  orderInCycle?: number | null;
+  joinedAt?: string | null;
+}
+
+export interface TontineRound {
+  id: string;
+  roundNumber: number;
+  scheduledDate: string;
+  beneficiaryUserId: string;
+  status: string;
+}
+
+export interface Tontine {
+  id: string;
+  name: string;
+  description?: string | null;
+  organizerId: string;
+  monthlyAmount: string | number;
+  totalMembers: number;
+  cycleDay: number;
+  startDate?: string | null;
+  status: 'pending' | 'active' | 'completed' | 'cancelled';
+  inviteCode: string;
+  members: TontineMember[];
+  rounds: TontineRound[];
+  myMembership?: {
+    status: 'invited' | 'joined';
+    orderInCycle?: number | null;
+    joinedAt?: string | null;
+  };
+}
+
+export const tontineService = {
+  list: () => api.get<Tontine[]>('/tontines').then((r) => r.data),
+  detail: (id: string) => api.get<Tontine>(`/tontines/${id}`).then((r) => r.data),
+  create: (data: {
+    name: string;
+    description?: string;
+    monthlyAmount: number;
+    totalMembers: number;
+    cycleDay: number;
+  }) => api.post<Tontine>('/tontines', data).then((r) => r.data),
+  joinByCode: (inviteCode: string) =>
+    api.post<Tontine>('/tontines/join', { inviteCode }).then((r) => r.data),
+  invite: (id: string, identifiers: string[]) =>
+    api.post<{ invited: string[]; alreadyMember: string[]; notFound: string[] }>(
+      `/tontines/${id}/invite`,
+      { identifiers },
+    ).then((r) => r.data),
+  accept: (id: string) => api.patch(`/tontines/${id}/accept`).then((r) => r.data),
+  decline: (id: string) => api.patch(`/tontines/${id}/decline`).then((r) => r.data),
+  leave: (id: string) => api.patch(`/tontines/${id}/leave`).then((r) => r.data),
+  cancel: (id: string) => api.delete(`/tontines/${id}`).then((r) => r.data),
+};
+
 export const vehicleRentalService = {
   // Public
   search: (params?: {

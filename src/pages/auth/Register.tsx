@@ -146,7 +146,7 @@ export default function Register() {
         step === 'identifier' ? (
           <>
             Déjà un compte ?{' '}
-            <Link to="/auth/login" className="text-brand-300 font-semibold hover:text-brand-200">
+            <Link to="/auth/login" className="text-brand-500 font-semibold hover:text-brand-600">
               Se connecter
             </Link>
           </>
@@ -184,7 +184,7 @@ export default function Register() {
             <div>
               <label className="label">Numéro de téléphone</label>
               <div className="flex">
-                <div className="px-3 flex items-center bg-bg-elevated border border-bg-border border-r-0 rounded-l-xl text-brand-300 font-bold text-sm">
+                <div className="px-3 flex items-center bg-bg-elevated border border-bg-border border-r-0 rounded-l-xl text-brand-500 font-bold text-sm">
                   +261
                 </div>
                 <input
@@ -225,11 +225,11 @@ export default function Register() {
 
           <p className="text-[11px] text-ink-dim text-center leading-relaxed">
             En continuant, vous acceptez nos{' '}
-            <a className="text-brand-300 hover:underline" href="#">
+            <a className="text-brand-500 hover:underline" href="#">
               conditions d'utilisation
             </a>{' '}
             et notre{' '}
-            <a className="text-brand-300 hover:underline" href="#">
+            <a className="text-brand-500 hover:underline" href="#">
               politique de confidentialité
             </a>
             .
@@ -261,13 +261,13 @@ export default function Register() {
             {!canResend ? (
               <span className="text-ink-muted">
                 Renvoyer dans{' '}
-                <span className="text-brand-300 font-bold">{timer}s</span>
+                <span className="text-brand-500 font-bold">{timer}s</span>
               </span>
             ) : (
               <button
                 type="button"
                 onClick={handleResend}
-                className="text-brand-300 font-semibold hover:text-brand-200"
+                className="text-brand-500 font-semibold hover:text-brand-600"
               >
                 Renvoyer le code
               </button>

@@ -80,12 +80,12 @@ export default function SeatPlanView({
   seats.forEach((s) => seatByNum.set(s.numPlace, s));
 
   return (
-    <div className="space-y-6">
+    <div className="flex flex-col items-center space-y-6">
       {[...layout.decks]
         .sort((a, b) => a.deckNumber - b.deckNumber)
         .map((deck) => (
-          <div key={deck.deckNumber}>
-            <div className="text-xs font-bold uppercase tracking-wider text-ink-dim mb-2">
+          <div key={deck.deckNumber} className="flex flex-col items-center">
+            <div className="text-xs font-bold uppercase tracking-wider text-ink-dim mb-2 text-center">
               {deck.name ?? `Étage ${deck.deckNumber}`}
             </div>
             <div className="inline-block bg-bg-elevated/50 rounded-2xl p-4 overflow-auto max-w-full">
@@ -208,11 +208,11 @@ function FallbackGrid({
   onSelectSeat: (n: number) => void;
 }) {
   return (
-    <div>
+    <div className="flex flex-col items-center">
       <div className="flex items-center gap-2 text-xs text-ink-muted mb-3">
         <UserCog size={14} /> Chauffeur en haut
       </div>
-      <div className="flex flex-wrap gap-2">
+      <div className="flex flex-wrap justify-center gap-2 max-w-[420px]">
         {seats.map((s) => {
           const reserved = s.isReserved;
           const selected = selectedSeats.includes(s.numPlace);

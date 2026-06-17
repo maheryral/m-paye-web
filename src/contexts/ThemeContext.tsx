@@ -56,7 +56,7 @@ export const ThemeProvider: React.FC<{ children: React.ReactNode }> = ({ childre
     if (saved && ['light', 'dark', 'system'].includes(saved)) {
       return saved as ThemeMode;
     }
-    return 'dark';
+    return 'light'; // défaut clair = palette du mobile
   });
   const [systemDark, setSystemDark] = useState<boolean>(getSystemPrefersDark);
 

@@ -32,7 +32,7 @@ import {
   Skeleton,
 } from '../../ui';
 
-type PayMethod = 'wallet' | 'cash' | 'mobile_money';
+type PayMethod = 'wallet' | 'cash' | 'mobile_money' | 'card';
 
 export default function TaxiBrousseVoyage() {
   const { id } = useParams<{ id: string }>();
@@ -45,6 +45,8 @@ export default function TaxiBrousseVoyage() {
   const [loading, setLoading] = useState(true);
   const [selectedSeats, setSelectedSeats] = useState<number[]>([]);
   const [payMethod, setPayMethod] = useState<PayMethod>('wallet');
+  // Méthode de paiement de l'acompte 50% quand "Espèces" est choisi
+  const [advanceMethod, setAdvanceMethod] = useState<'wallet' | 'mobile_money' | 'card'>('wallet');
   const [submitting, setSubmitting] = useState(false);
   const [success, setSuccess] = useState<{ seats: number[]; count: number } | null>(
     null,
@@ -56,6 +58,14 @@ export default function TaxiBrousseVoyage() {
     );
 
   const totalPrice = voyage ? Number(voyage.prix) * selectedSeats.length : 0;
+  // Espèces → acompte 50 % maintenant, reste en espèces à bord
+  const isCash = payMethod === 'cash';
+  const advance = Math.round(totalPrice * 0.5);
+  const amountNow = isCash ? advance : totalPrice;
+  // Méthode qui paie réellement maintenant (wallet/mobile money)
+  const payNow: 'wallet' | 'mobile_money' | 'card' = isCash
+    ? advanceMethod
+    : (payMethod as 'wallet' | 'mobile_money' | 'card');
 
   const load = useCallback(async () => {
     if (!id) return;
@@ -81,7 +91,8 @@ export default function TaxiBrousseVoyage() {
 
   const book = async () => {
     if (!voyage || selectedSeats.length === 0) return;
-    if (payMethod === 'wallet' && balance < totalPrice) {
+    // On ne paie maintenant que l'acompte si espèces ; vérif solde sur ce montant
+    if (payNow === 'wallet' && balance < amountNow) {
       return alert(`Solde insuffisant — ${formatCurrency(balance)} disponible`);
     }
     setSubmitting(true);
@@ -92,8 +103,8 @@ export default function TaxiBrousseVoyage() {
         voyage.prix,
       );
       const ids = r.data.map((res) => res.id);
-      await taxiBrousseApi.payReservationBatch(ids, payMethod);
-      if (payMethod === 'wallet') await fetchBalance();
+      await taxiBrousseApi.payReservationBatch(ids, payMethod, advanceMethod);
+      if (payNow === 'wallet') await fetchBalance();
       setSuccess({ seats: [...selectedSeats], count: selectedSeats.length });
     } catch (e: any) {
       alert(e?.response?.data?.message || 'Réservation échouée');
@@ -357,6 +368,14 @@ export default function TaxiBrousseVoyage() {
                 onSelect={() => setPayMethod('wallet')}
               />
               <PayOption
+                id="card"
+                title="Carte bancaire"
+                description="Débit sur votre carte par défaut"
+                icon={CreditCard}
+                selected={payMethod === 'card'}
+                onSelect={() => setPayMethod('card')}
+              />
+              <PayOption
                 id="mobile_money"
                 title="Mobile Money"
                 description="MVola, Orange Money, Airtel"
@@ -367,12 +386,66 @@ export default function TaxiBrousseVoyage() {
               <PayOption
                 id="cash"
                 title="Espèces à bord"
-                description="Payez directement au chauffeur"
+                description="Acompte 50% maintenant, le reste en espèces"
                 icon={Wallet}
                 selected={payMethod === 'cash'}
                 onSelect={() => setPayMethod('cash')}
               />
             </div>
+
+            {/* Acompte 50% : choix de la méthode quand espèces */}
+            {isCash && (
+              <div className="mt-4 rounded-xl border border-brand-500/30 bg-brand-500/5 p-3">
+                <div className="mb-2 flex items-center justify-between text-sm">
+                  <span className="font-bold">Acompte à payer maintenant (50%)</span>
+                  <span className="font-extrabold text-brand-300">
+                    {advance.toLocaleString('fr-FR')} Ar
+                  </span>
+                </div>
+                <div className="mb-3 text-xs text-ink-muted">
+                  Reste {(totalPrice - advance).toLocaleString('fr-FR')} Ar à régler
+                  en espèces au chauffeur.
+                </div>
+                <div className="text-[11px] font-semibold text-ink-muted mb-1.5">
+                  Payer l'acompte avec
+                </div>
+                <div className="flex gap-2">
+                  <button
+                    type="button"
+                    onClick={() => setAdvanceMethod('wallet')}
+                    className={`flex-1 rounded-lg border px-3 py-2 text-xs font-semibold ${
+                      advanceMethod === 'wallet'
+                        ? 'border-brand-500 bg-brand-500/15 text-brand-300'
+                        : 'border-bg-border text-ink-muted'
+                    }`}
+                  >
+                    Wallet
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setAdvanceMethod('mobile_money')}
+                    className={`flex-1 rounded-lg border px-3 py-2 text-xs font-semibold ${
+                      advanceMethod === 'mobile_money'
+                        ? 'border-brand-500 bg-brand-500/15 text-brand-300'
+                        : 'border-bg-border text-ink-muted'
+                    }`}
+                  >
+                    Mobile Money
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setAdvanceMethod('card')}
+                    className={`flex-1 rounded-lg border px-3 py-2 text-xs font-semibold ${
+                      advanceMethod === 'card'
+                        ? 'border-brand-500 bg-brand-500/15 text-brand-300'
+                        : 'border-bg-border text-ink-muted'
+                    }`}
+                  >
+                    Carte
+                  </button>
+                </div>
+              </div>
+            )}
           </Card>
         </div>
 
@@ -409,22 +482,32 @@ export default function TaxiBrousseVoyage() {
               </Row>
               <Row label="Paiement">
                 <span className="text-xs font-semibold capitalize">
-                  {payMethod === 'wallet' ? 'Wallet' : payMethod === 'mobile_money' ? 'Mobile Money' : 'Espèces'}
+                  {payMethod === 'wallet'
+                    ? 'Wallet'
+                    : payMethod === 'card'
+                      ? 'Carte'
+                      : payMethod === 'mobile_money'
+                        ? 'Mobile Money'
+                        : 'Espèces'}
                 </span>
               </Row>
             </div>
 
             <div className="flex items-baseline justify-between mb-1">
-              <span className="text-xs text-ink-muted">Total à payer</span>
+              <span className="text-xs text-ink-muted">
+                {isCash ? 'Acompte à payer maintenant' : 'Total à payer'}
+              </span>
               <span className="text-3xl font-bold tracking-tight">
-                {totalPrice.toLocaleString('fr-FR')}{' '}
+                {amountNow.toLocaleString('fr-FR')}{' '}
                 <span className="text-base font-semibold">Ar</span>
               </span>
             </div>
             <div className="text-[10px] text-ink-dim mb-5">
-              {selectedSeats.length > 1
-                ? `${Number(voyage.prix).toLocaleString('fr-FR')} Ar × ${selectedSeats.length} places`
-                : 'Sans frais additionnels'}
+              {isCash
+                ? `Total ${totalPrice.toLocaleString('fr-FR')} Ar · reste ${(totalPrice - advance).toLocaleString('fr-FR')} Ar en espèces à bord`
+                : selectedSeats.length > 1
+                  ? `${Number(voyage.prix).toLocaleString('fr-FR')} Ar × ${selectedSeats.length} places`
+                  : 'Sans frais additionnels'}
             </div>
 
             <Button
